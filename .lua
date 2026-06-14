@@ -39,7 +39,7 @@ local function fire(path, ...)
     return true, res
 end
 
--- // ========== WORLD HELPERS (from original) ========== \\ --
+-- // ========== WORLD HELPERS ========== \\ --
 local function myPlot()
     local id = LocalPlayer:GetAttribute("PlotId")
     local gardens = Workspace:FindFirstChild("Gardens")
@@ -116,10 +116,19 @@ local function isOwnerInGarden(ownerUserId)
     return false
 end
 
+-- ========== GET FRUIT VOLUME ========== --
+local function getFruitVolume(model)
+    if not model then return 0 end
+    local size = model:GetExtentsSize()
+    return math.floor(size.X * size.Y * size.Z)
+end
+
+local HIGH_VOLUME = 500
+
 -- ========================================== --
 
--- // ========== STEALABLE (original + owner check) ========== \\ --
-local function stealable()
+-- // ========== STEALABLE ========== \\ --
+local function stealable(onlyHighValue)
     local out = {}
     for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
         if pr:IsA("ProximityPrompt") and pr.Enabled and pr:IsDescendantOf(Workspace) then
@@ -127,11 +136,10 @@ local function stealable()
             local pid = m and m:GetAttribute("PlantId")
             if pid then
                 local owner = tonumber(m:GetAttribute("UserId")) or 0
+                if owner ~= 0 and isOwnerInGarden(owner) then continue end
                 
-                -- Skip if owner is IN their garden
-                if owner ~= 0 and isOwnerInGarden(owner) then
-                    continue
-                end
+                local volume = getFruitVolume(m)
+                if onlyHighValue and volume < HIGH_VOLUME then continue end
                 
                 local pos
                 local pp = pr.Parent
@@ -141,15 +149,22 @@ local function stealable()
                     local ok, pv = pcall(function() return m:GetPivot().Position end)
                     if ok then pos = pv end
                 end
+                
                 out[#out + 1] = {
                     owner = owner,
                     plantId = tostring(pid),
                     fruitId = tostring(m:GetAttribute("FruitId") or ""),
                     pos = pos,
+                    volume = volume,
                 }
             end
         end
     end
+    
+    if onlyHighValue then
+        table.sort(out, function(a, b) return a.volume > b.volume end)
+    end
+    
     return out
 end
 
@@ -158,308 +173,73 @@ local function hrpNow()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
--- // ========== BEAUTIFUL PLAYER ESP ========== \\ --
-local PlayerESPFolder = Instance.new("Folder")
-PlayerESPFolder.Name = "PlayerESP"
-PlayerESPFolder.Parent = Workspace
-
-local PlayerESPObjects = {}
-
-local function createPlayerESP(player)
-    if player == LocalPlayer then return end
-    if PlayerESPObjects[player.UserId] then return end
+-- // ========== SMOOTH TELEPORT ========== \\ --
+local function smoothTP(pos, speed)
+    speed = speed or 0.3
+    local hrp = hrpNow()
+    if not hrp then return false end
     
-    local char = player.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    -- Main Billboard
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "PlayerESP"
-    billboard.AlwaysOnTop = true
-    billboard.Size = UDim2.new(0, 220, 0, 70)
-    billboard.StudsOffset = Vector3.new(0, 4, 0)
-    billboard.Adornee = hrp
-    billboard.Parent = PlayerESPFolder
-    
-    -- Background frame with rounded corners
-    local bg = Instance.new("Frame")
-    bg.Name = "BG"
-    bg.Size = UDim2.new(1, 0, 1, 0)
-    bg.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-    bg.BackgroundTransparency = 0.15
-    bg.BorderSizePixel = 0
-    bg.Parent = billboard
-    
-    local bgCorner = Instance.new("UICorner")
-    bgCorner.CornerRadius = UDim.new(0, 10)
-    bgCorner.Parent = bg
-    
-    -- Top accent bar
-    local accent = Instance.new("Frame")
-    accent.Name = "Accent"
-    accent.Size = UDim2.new(1, 0, 0, 3)
-    accent.Position = UDim2.new(0, 0, 0, 0)
-    accent.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    accent.BorderSizePixel = 0
-    accent.Parent = bg
-    
-    local accentCorner = Instance.new("UICorner")
-    accentCorner.CornerRadius = UDim.new(0, 10)
-    accentCorner.Parent = accent
-    
-    -- Player name
-    local nameLabel = Instance.new("TextLabel")
-    nameLabel.Name = "Name"
-    nameLabel.Size = UDim2.new(1, -10, 0, 22)
-    nameLabel.Position = UDim2.new(0, 5, 0, 6)
-    nameLabel.BackgroundTransparency = 1
-    nameLabel.Text = player.Name
-    nameLabel.TextSize = 15
-    nameLabel.Font = Enum.Font.GothamBold
-    nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-    nameLabel.Parent = bg
-    
-    -- Status text
-    local statusLabel = Instance.new("TextLabel")
-    statusLabel.Name = "Status"
-    statusLabel.Size = UDim2.new(1, -10, 0, 16)
-    statusLabel.Position = UDim2.new(0, 5, 0, 28)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.TextSize = 12
-    statusLabel.Font = Enum.Font.GothamMedium
-    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statusLabel.Parent = bg
-    
-    -- Sub status (distance/fruit info)
-    local subLabel = Instance.new("TextLabel")
-    subLabel.Name = "Sub"
-    subLabel.Size = UDim2.new(1, -10, 0, 14)
-    subLabel.Position = UDim2.new(0, 5, 0, 44)
-    subLabel.BackgroundTransparency = 1
-    subLabel.TextSize = 10
-    subLabel.Font = Enum.Font.Gotham
-    subLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-    subLabel.TextXAlignment = Enum.TextXAlignment.Left
-    subLabel.Parent = bg
-    
-    -- Glow effect behind player
-    local glow = Instance.new("PointLight")
-    glow.Name = "ESPGlow"
-    glow.Brightness = 2
-    glow.Range = 8
-    glow.Color = Color3.fromRGB(255, 255, 255)
-    glow.Parent = hrp
-    
-    -- Tracer line (beam from bottom of screen)
-    local tracer = Instance.new("Beam")
-    tracer.Name = "Tracer"
-    tracer.Width0 = 0.08
-    tracer.Width1 = 0.08
-    tracer.FaceCamera = true
-    tracer.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-    tracer.Transparency = NumberSequence.new(0.3)
-    tracer.Parent = hrp
-    
-    local attachment0 = Instance.new("Attachment")
-    attachment0.Name = "TracerStart"
-    attachment0.Position = Vector3.new(0, -2, 0)
-    attachment0.Parent = hrp
-    
-    local attachment1 = Instance.new("Attachment")
-    attachment1.Name = "TracerEnd"
-    attachment1.Position = Vector3.new(0, 0, 0)
-    attachment1.Parent = hrp
-    
-    tracer.Attachment0 = attachment0
-    tracer.Attachment1 = attachment1
-    
-    -- 3D Box around player (using 4 corner beams for clean look)
-    local boxFolder = Instance.new("Folder")
-    boxFolder.Name = "Box"
-    boxFolder.Parent = hrp
-    
-    local function createBeam(p0, p1, color)
-        local beam = Instance.new("Beam")
-        beam.Width0 = 0.05
-        beam.Width1 = 0.05
-        beam.Color = ColorSequence.new(color)
-        beam.Transparency = NumberSequence.new(0.15)
-        beam.FaceCamera = true
-        
-        local a0 = Instance.new("Attachment")
-        a0.Position = p0
-        a0.Parent = hrp
-        local a1 = Instance.new("Attachment")
-        a1.Position = p1
-        a1.Parent = hrp
-        
-        beam.Attachment0 = a0
-        beam.Attachment1 = a1
-        beam.Parent = boxFolder
-        return beam
-    end
-    
-    local boxColor = Color3.fromRGB(255, 255, 255)
-    local s = Vector3.new(2, 4.5, 2)
-    
-    -- Box edges
-    createBeam(Vector3.new(-s.X, -s.Y, -s.Z), Vector3.new(s.X, -s.Y, -s.Z), boxColor)
-    createBeam(Vector3.new(s.X, -s.Y, -s.Z), Vector3.new(s.X, -s.Y, s.Z), boxColor)
-    createBeam(Vector3.new(s.X, -s.Y, s.Z), Vector3.new(-s.X, -s.Y, s.Z), boxColor)
-    createBeam(Vector3.new(-s.X, -s.Y, s.Z), Vector3.new(-s.X, -s.Y, -s.Z), boxColor)
-    
-    createBeam(Vector3.new(-s.X, s.Y, -s.Z), Vector3.new(s.X, s.Y, -s.Z), boxColor)
-    createBeam(Vector3.new(s.X, s.Y, -s.Z), Vector3.new(s.X, s.Y, s.Z), boxColor)
-    createBeam(Vector3.new(s.X, s.Y, s.Z), Vector3.new(-s.X, s.Y, s.Z), boxColor)
-    createBeam(Vector3.new(-s.X, s.Y, s.Z), Vector3.new(-s.X, s.Y, -s.Z), boxColor)
-    
-    createBeam(Vector3.new(-s.X, -s.Y, -s.Z), Vector3.new(-s.X, s.Y, -s.Z), boxColor)
-    createBeam(Vector3.new(s.X, -s.Y, -s.Z), Vector3.new(s.X, s.Y, -s.Z), boxColor)
-    createBeam(Vector3.new(s.X, -s.Y, s.Z), Vector3.new(s.X, s.Y, s.Z), boxColor)
-    createBeam(Vector3.new(-s.X, -s.Y, s.Z), Vector3.new(-s.X, s.Y, s.Z), boxColor)
-    
-    PlayerESPObjects[player.UserId] = {
-        billboard = billboard,
-        bg = bg,
-        accent = accent,
-        nameLabel = nameLabel,
-        statusLabel = statusLabel,
-        subLabel = subLabel,
-        glow = glow,
-        tracer = tracer,
-        boxFolder = boxFolder,
-        player = player,
-    }
+    local tween = TweenService:Create(hrp, TweenInfo.new(speed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+        CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    })
+    tween:Play()
+    tween.Completed:Wait()
+    return true
 end
 
-local function updatePlayerESP()
-    for userId, esp in pairs(PlayerESPObjects) do
-        local player = esp.player
-        if not player or not player.Parent then
-            pcall(function() esp.billboard:Destroy() end)
-            pcall(function() esp.glow:Destroy() end)
-            pcall(function() esp.tracer:Destroy() end)
-            pcall(function() esp.boxFolder:Destroy() end)
-            PlayerESPObjects[userId] = nil
-            continue
+-- // ========== HIGH VOLUME FRUIT ESP (BLOCK ONLY) ========== \\ --
+local FruitESPFolder = Instance.new("Folder")
+FruitESPFolder.Name = "HighFruitESP"
+FruitESPFolder.Parent = Workspace
+
+local FruitESPObjects = {}
+
+local function createFruitESP(model)
+    if not model or not model.Parent then return end
+    if FruitESPObjects[model] then return end
+    
+    local volume = getFruitVolume(model)
+    if volume < HIGH_VOLUME then return end
+    
+    local adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+    if not adornee then
+        for _, child in ipairs(model:GetDescendants()) do
+            if child:IsA("BasePart") then adornee = child; break end
         end
-        
-        local char = player.Character
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if not hrp then
-            pcall(function() esp.billboard:Destroy() end)
-            pcall(function() esp.glow:Destroy() end)
-            pcall(function() esp.tracer:Destroy() end)
-            pcall(function() esp.boxFolder:Destroy() end)
-            PlayerESPObjects[userId] = nil
-            continue
+    end
+    if not adornee then return end
+    
+    local box = Instance.new("BoxHandleAdornment")
+    box.Name = "HighFruitBox"
+    box.Size = adornee.Size + Vector3.new(0.5, 0.5, 0.5)
+    box.Transparency = 0.2
+    box.AlwaysOnTop = true
+    box.ZIndex = 10
+    box.Adornee = adornee
+    box.Parent = FruitESPFolder
+    
+    if volume > 1000 then box.Color3 = Color3.fromRGB(255, 215, 0)
+    elseif volume > 750 then box.Color3 = Color3.fromRGB(255, 100, 100)
+    else box.Color3 = Color3.fromRGB(100, 255, 100) end
+    
+    FruitESPObjects[model] = { box = box, model = model }
+end
+
+local function scanFruitESP()
+    for model, esp in pairs(FruitESPObjects) do
+        if not model or not model.Parent then
+            pcall(function() esp.box:Destroy() end)
+            FruitESPObjects[model] = nil
         end
-        
-        if esp.billboard.Adornee ~= hrp then
-            esp.billboard.Adornee = hrp
-        end
-        
-        local inGarden = isOwnerInGarden(player.UserId)
-        local hasFruit = false
-        
-        for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
-            if pr:IsA("ProximityPrompt") and pr.Enabled then
-                local m = promptCarrier(pr)
-                if m and tonumber(m:GetAttribute("UserId")) == player.UserId then
-                    hasFruit = true
-                    break
-                end
-            end
-        end
-        
-        -- Calculate distance
-        local myHrp = hrpNow()
-        local distance = myHrp and math.floor((myHrp.Position - hrp.Position).Magnitude) or 0
-        
-        if inGarden then
-            -- RED - Owner in garden, SKIP
-            local color = Color3.fromRGB(255, 70, 70)
-            esp.accent.BackgroundColor3 = color
-            esp.nameLabel.TextColor3 = Color3.fromRGB(255, 200, 200)
-            esp.statusLabel.Text = "🔒 IN GARDEN"
-            esp.statusLabel.TextColor3 = color
-            esp.subLabel.Text = distance .. " studs away • SKIP"
-            esp.glow.Color = color
-            esp.glow.Brightness = 1
-            
-            for _, child in ipairs(esp.boxFolder:GetChildren()) do
-                if child:IsA("Beam") then
-                    child.Color = ColorSequence.new(color)
-                end
-            end
-            esp.tracer.Color = ColorSequence.new(color)
-            
-        else
-            if hasFruit then
-                -- GREEN - AFK + has fruit, STEAL!
-                local color = Color3.fromRGB(80, 255, 120)
-                esp.accent.BackgroundColor3 = color
-                esp.nameLabel.TextColor3 = Color3.fromRGB(200, 255, 210)
-                esp.statusLabel.Text = "✅ AFK • READY TO STEAL"
-                esp.statusLabel.TextColor3 = color
-                esp.subLabel.Text = distance .. " studs away • " .. (isNight() and "🌙 NIGHT" or "☀️ DAY")
-                esp.glow.Color = color
-                esp.glow.Brightness = 3
-                
-                for _, child in ipairs(esp.boxFolder:GetChildren()) do
-                    if child:IsA("Beam") then
-                        child.Color = ColorSequence.new(color)
-                    end
-                end
-                esp.tracer.Color = ColorSequence.new(color)
-                
-            else
-                -- GRAY - AFK but no fruit
-                local color = Color3.fromRGB(150, 150, 160)
-                esp.accent.BackgroundColor3 = color
-                esp.nameLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
-                esp.statusLabel.Text = "💤 AFK • No fruit"
-                esp.statusLabel.TextColor3 = color
-                esp.subLabel.Text = distance .. " studs away"
-                esp.glow.Color = color
-                esp.glow.Brightness = 1
-                
-                for _, child in ipairs(esp.boxFolder:GetChildren()) do
-                    if child:IsA("Beam") then
-                        child.Color = ColorSequence.new(color)
-                    end
-                end
-                esp.tracer.Color = ColorSequence.new(color)
-            end
+    end
+    
+    for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
+        if pr:IsA("ProximityPrompt") and pr.Enabled and pr:IsDescendantOf(Workspace) then
+            local m = promptCarrier(pr)
+            if m then createFruitESP(m) end
         end
     end
 end
-
-Players.PlayerAdded:Connect(function(player)
-    player.CharacterAdded:Connect(function()
-        task.wait(1)
-        createPlayerESP(player)
-    end)
-end)
-
-for _, plr in ipairs(Players:GetPlayers()) do
-    if plr.Character then
-        createPlayerESP(plr)
-    end
-    plr.CharacterAdded:Connect(function()
-        task.wait(1)
-        createPlayerESP(plr)
-    end)
-end
-
-RunService.RenderStepped:Connect(function()
-    if Settings.playerESP then
-        updatePlayerESP()
-    end
-end)
 
 -- // ========== GUI ========== \\ --
 local ScreenGui = Instance.new("ScreenGui")
@@ -470,20 +250,17 @@ ScreenGui.Parent = game:GetService("CoreGui") or LocalPlayer:WaitForChild("Playe
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "Main"
-MainFrame.Size = UDim2.new(0, 280, 0, 240)
-MainFrame.Position = UDim2.new(0.5, -140, 0.5, -120)
+MainFrame.Size = UDim2.new(0, 280, 0, 280)
+MainFrame.Position = UDim2.new(0.5, -140, 0.5, -140)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
-local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 8)
-Corner.Parent = MainFrame
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
-Title.Name = "Title"
 Title.Size = UDim2.new(1, 0, 0, 36)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
 Title.BorderSizePixel = 0
@@ -493,9 +270,7 @@ Title.TextSize = 18
 Title.Font = Enum.Font.GothamBold
 Title.Parent = MainFrame
 
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = Title
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 8)
 
 local function makeToggle(name, y, default)
     local btn = Instance.new("TextButton")
@@ -509,23 +284,19 @@ local function makeToggle(name, y, default)
     btn.TextSize = 14
     btn.Font = Enum.Font.GothamSemibold
     btn.Parent = MainFrame
-    
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = btn
-    
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     return btn
 end
 
 local StealToggle = makeToggle("Auto-Steal", 50, false)
-local TPToggle = makeToggle("Teleport to Fruit", 92, true)
-local ReturnToggle = makeToggle("Return to Base", 134, true)
-local ESPToggle = makeToggle("Player ESP", 176, true)
+local HighValueToggle = makeToggle("Steal High Value Only (>500)", 92, true)
+local TPToggle = makeToggle("Teleport to Fruit", 134, true)
+local ReturnToggle = makeToggle("Return to Base", 176, true)
+local ESPToggle = makeToggle("High Volume ESP", 218, true)
 
 local StatusLabel = Instance.new("TextLabel")
-StatusLabel.Name = "Status"
 StatusLabel.Size = UDim2.new(1, -20, 0, 24)
-StatusLabel.Position = UDim2.new(0, 10, 0, 216)
+StatusLabel.Position = UDim2.new(0, 10, 0, 256)
 StatusLabel.BackgroundTransparency = 1
 StatusLabel.Text = "Waiting..."
 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
@@ -535,9 +306,8 @@ StatusLabel.TextXAlignment = Enum.TextXAlignment.Center
 StatusLabel.Parent = MainFrame
 
 local StolenLabel = Instance.new("TextLabel")
-StolenLabel.Name = "Stolen"
 StolenLabel.Size = UDim2.new(1, -20, 0, 20)
-StolenLabel.Position = UDim2.new(0, 10, 0, 238)
+StolenLabel.Position = UDim2.new(0, 10, 0, 278)
 StolenLabel.BackgroundTransparency = 1
 StolenLabel.Text = "Stolen: 0"
 StolenLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -549,9 +319,10 @@ StolenLabel.Parent = MainFrame
 -- // ========== STATE ========== \\ --
 local Settings = {
     autoSteal = false,
+    stealHighValue = true,
     stealTeleport = true,
     stealReturnBase = true,
-    playerESP = true,
+    espEnabled = true,
     stealDelay = 0.05,
 }
 
@@ -559,7 +330,8 @@ local Stats = { stolen = 0 }
 
 -- // ========== TOGGLE LOGIC ========== \\ --
 local function updateToggle(btn, state)
-    Settings[btn.Name:gsub("-", ""):lower()] = state
+    local key = btn.Name:gsub("[^a-zA-Z]", ""):lower()
+    Settings[key] = state
     btn.BackgroundColor3 = state and Color3.fromRGB(0, 170, 80) or Color3.fromRGB(60, 60, 70)
     btn.Text = (state and "✅ " or "❌ ") .. btn.Name
 end
@@ -567,6 +339,11 @@ end
 StealToggle.MouseButton1Click:Connect(function()
     Settings.autoSteal = not Settings.autoSteal
     updateToggle(StealToggle, Settings.autoSteal)
+end)
+
+HighValueToggle.MouseButton1Click:Connect(function()
+    Settings.stealHighValue = not Settings.stealHighValue
+    updateToggle(HighValueToggle, Settings.stealHighValue)
 end)
 
 TPToggle.MouseButton1Click:Connect(function()
@@ -580,21 +357,26 @@ ReturnToggle.MouseButton1Click:Connect(function()
 end)
 
 ESPToggle.MouseButton1Click:Connect(function()
-    Settings.playerESP = not Settings.playerESP
-    updateToggle(ESPToggle, Settings.playerESP)
-    PlayerESPFolder.Enabled = Settings.playerESP
-    if not Settings.playerESP then
-        for _, esp in pairs(PlayerESPObjects) do
-            pcall(function() esp.billboard:Destroy() end)
-            pcall(function() esp.glow:Destroy() end)
-            pcall(function() esp.tracer:Destroy() end)
-            pcall(function() esp.boxFolder:Destroy() end)
+    Settings.espEnabled = not Settings.espEnabled
+    updateToggle(ESPToggle, Settings.espEnabled)
+    FruitESPFolder.Enabled = Settings.espEnabled
+    if not Settings.espEnabled then
+        for _, esp in pairs(FruitESPObjects) do
+            pcall(function() esp.box:Destroy() end)
         end
-        table.clear(PlayerESPObjects)
+        table.clear(FruitESPObjects)
     end
 end)
 
--- // ========== MAIN LOOP (exact original logic) ========== \\ --
+-- // ========== ESP UPDATE LOOP ========== \\ --
+task.spawn(function()
+    while true do
+        if Settings.espEnabled then scanFruitESP() end
+        task.wait(2)
+    end
+end)
+
+-- // ========== MAIN STEAL LOOP (SMOOTH) ========== \\ --
 task.spawn(function()
     while true do
         if Settings.autoSteal then
@@ -605,46 +387,55 @@ task.spawn(function()
                 continue
             end
             
-            local targets = stealable()
+            local targets = stealable(Settings.stealHighValue)
             if #targets == 0 then
-                StatusLabel.Text = "🔍 No targets"
+                StatusLabel.Text = "🔍 No " .. (Settings.stealHighValue and "high value " or "") .. "targets"
                 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
                 task.wait(1.5)
                 continue
             end
             
-            StatusLabel.Text = "🌙 Stealing..."
+            StatusLabel.Text = "🌙 Stealing " .. #targets .. " fruit(s)..."
             StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
             
             for _, f in ipairs(targets) do
                 if not (Settings.autoSteal and isNight()) then break end
                 
-                -- 1) Teleport to fruit (proximity is server-gated)
+                -- Smooth teleport to fruit
                 if Settings.stealTeleport and f.pos then
-                    local hrp = hrpNow()
-                    if hrp then
-                        hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 4, 0))
-                        task.wait(0.4)
+                    if not smoothTP(f.pos, 0.25) then
+                        -- Fallback to instant if tween fails
+                        local hrp = hrpNow()
+                        if hrp then hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 3, 0)) end
                     end
+                    task.wait(0.15) -- Small wait after TP for server to register
                 end
                 
-                -- 2) Steal (original: fire + fire back-to-back)
+                -- Steal (fire both rapidly)
                 fire("Steal.BeginSteal", f.owner, f.plantId, f.fruitId)
+                task.wait(0.05)
                 fire("Steal.CompleteSteal")
-                Stats.stolen += 1
-                StolenLabel.Text = "Stolen: " .. Stats.stolen
                 
-                -- 3) Return to base to bank
+                Stats.stolen += 1
+                StolenLabel.Text = "Stolen: " .. Stats.stolen .. (f.volume and " (Vol: " .. f.volume .. ")" or "")
+                StatusLabel.Text = "✅ Stole " .. (f.volume and f.volume or "") .. " vol fruit"
+                StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+                
+                -- Smooth return to base
                 if Settings.stealReturnBase then
                     local base = myBasePos()
-                    local hrp = hrpNow()
-                    if base and hrp then
-                        hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0))
+                    if base then
+                        if not smoothTP(base, 0.3) then
+                            local hrp = hrpNow()
+                            if hrp then hrp.CFrame = CFrame.new(base + Vector3.new(0, 3, 0)) end
+                        end
+                        
+                        -- Wait for stolen fruit to bank
                         local t0 = os.clock()
                         while LocalPlayer:GetAttribute("CarryingStolenFruit") 
-                            and os.clock() - t0 < 3 
+                            and os.clock() - t0 < 2 
                             and Settings.autoSteal do
-                            task.wait(0.15)
+                            task.wait(0.1)
                         end
                     end
                 end
@@ -664,12 +455,11 @@ end)
 -- // ========== CLEANUP ========== \\ --
 local function unload()
     Settings.autoSteal = false
-    PlayerESPFolder:Destroy()
+    FruitESPFolder:Destroy()
     ScreenGui:Destroy()
 end
 
 local CloseBtn = Instance.new("TextButton")
-CloseBtn.Name = "Close"
 CloseBtn.Size = UDim2.new(0, 28, 0, 28)
 CloseBtn.Position = UDim2.new(1, -32, 0, 4)
 CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
@@ -680,10 +470,8 @@ CloseBtn.TextSize = 20
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.Parent = MainFrame
 
-local CloseCorner = Instance.new("UICorner")
-CloseCorner.CornerRadius = UDim.new(0, 6)
-CloseCorner.Parent = CloseBtn
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
 CloseBtn.MouseButton1Click:Connect(unload)
 
-print("🌙 St3al at Night loaded | Beautiful Player ESP | Skip owner-in-garden")
+print("🌙 St3al at Night loaded | Smooth TP | High Volume ESP | Drag to move")
