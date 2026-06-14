@@ -7,7 +7,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 
 -- // ========== NETWORKING ========== \\ --
@@ -39,7 +38,7 @@ local function fire(path, ...)
     return true, res
 end
 
--- // ========== WORLD HELPERS ========== \\ --
+-- // ========== WORLD HELPERS (original) ========== \\ --
 local function myPlot()
     local id = LocalPlayer:GetAttribute("PlotId")
     local gardens = Workspace:FindFirstChild("Gardens")
@@ -123,11 +122,11 @@ local function getFruitVolume(model)
     return math.floor(size.X * size.Y * size.Z)
 end
 
-local HIGH_VOLUME = 500
+local HIGH_VOLUME = 750
 
 -- ========================================== --
 
--- // ========== STEALABLE ========== \\ --
+-- // ========== STEALABLE (original + owner check + volume) ========== \\ --
 local function stealable(onlyHighValue)
     local out = {}
     for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
@@ -136,10 +135,18 @@ local function stealable(onlyHighValue)
             local pid = m and m:GetAttribute("PlantId")
             if pid then
                 local owner = tonumber(m:GetAttribute("UserId")) or 0
-                if owner ~= 0 and isOwnerInGarden(owner) then continue end
+                
+                -- NEW: Skip if owner is IN their garden
+                if owner ~= 0 and isOwnerInGarden(owner) then
+                    continue
+                end
                 
                 local volume = getFruitVolume(m)
-                if onlyHighValue and volume < HIGH_VOLUME then continue end
+                
+                -- NEW: Only high volume if enabled
+                if onlyHighValue and volume < HIGH_VOLUME then
+                    continue
+                end
                 
                 local pos
                 local pp = pr.Parent
@@ -149,7 +156,6 @@ local function stealable(onlyHighValue)
                     local ok, pv = pcall(function() return m:GetPivot().Position end)
                     if ok then pos = pv end
                 end
-                
                 out[#out + 1] = {
                     owner = owner,
                     plantId = tostring(pid),
@@ -160,11 +166,6 @@ local function stealable(onlyHighValue)
             end
         end
     end
-    
-    if onlyHighValue then
-        table.sort(out, function(a, b) return a.volume > b.volume end)
-    end
-    
     return out
 end
 
@@ -173,21 +174,7 @@ local function hrpNow()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
--- // ========== SMOOTH TELEPORT ========== \\ --
-local function smoothTP(pos, speed)
-    speed = speed or 0.3
-    local hrp = hrpNow()
-    if not hrp then return false end
-    
-    local tween = TweenService:Create(hrp, TweenInfo.new(speed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-        CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-    })
-    tween:Play()
-    tween.Completed:Wait()
-    return true
-end
-
--- // ========== HIGH VOLUME FRUIT ESP (BLOCK ONLY) ========== \\ --
+-- // ========== HIGH VOLUME FRUIT ESP (BLOCK ONLY >750) ========== \\ --
 local FruitESPFolder = Instance.new("Folder")
 FruitESPFolder.Name = "HighFruitESP"
 FruitESPFolder.Parent = Workspace
@@ -199,7 +186,7 @@ local function createFruitESP(model)
     if FruitESPObjects[model] then return end
     
     local volume = getFruitVolume(model)
-    if volume < HIGH_VOLUME then return end
+    if volume < HIGH_VOLUME then return end -- Only >750
     
     local adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
     if not adornee then
@@ -218,9 +205,9 @@ local function createFruitESP(model)
     box.Adornee = adornee
     box.Parent = FruitESPFolder
     
-    if volume > 1000 then box.Color3 = Color3.fromRGB(255, 215, 0)
-    elseif volume > 750 then box.Color3 = Color3.fromRGB(255, 100, 100)
-    else box.Color3 = Color3.fromRGB(100, 255, 100) end
+    if volume > 1500 then box.Color3 = Color3.fromRGB(255, 215, 0)      -- Gold
+    elseif volume > 1000 then box.Color3 = Color3.fromRGB(255, 100, 100) -- Red
+    else box.Color3 = Color3.fromRGB(100, 255, 100) end                  -- Green
     
     FruitESPObjects[model] = { box = box, model = model }
 end
@@ -289,7 +276,7 @@ local function makeToggle(name, y, default)
 end
 
 local StealToggle = makeToggle("Auto-Steal", 50, false)
-local HighValueToggle = makeToggle("Steal High Value Only (>500)", 92, true)
+local HighValueToggle = makeToggle("Steal High Value Only (>750)", 92, true)
 local TPToggle = makeToggle("Teleport to Fruit", 134, true)
 local ReturnToggle = makeToggle("Return to Base", 176, true)
 local ESPToggle = makeToggle("High Volume ESP", 218, true)
@@ -376,7 +363,7 @@ task.spawn(function()
     end
 end)
 
--- // ========== MAIN STEAL LOOP (SMOOTH) ========== \\ --
+-- // ========== MAIN STEAL LOOP (ORIGINAL LOGIC) ========== \\ --
 task.spawn(function()
     while true do
         if Settings.autoSteal then
@@ -401,41 +388,32 @@ task.spawn(function()
             for _, f in ipairs(targets) do
                 if not (Settings.autoSteal and isNight()) then break end
                 
-                -- Smooth teleport to fruit
+                -- 1) Teleport to fruit (original)
                 if Settings.stealTeleport and f.pos then
-                    if not smoothTP(f.pos, 0.25) then
-                        -- Fallback to instant if tween fails
-                        local hrp = hrpNow()
-                        if hrp then hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 3, 0)) end
+                    local hrp = hrpNow()
+                    if hrp then
+                        hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 4, 0))
+                        task.wait(0.4)
                     end
-                    task.wait(0.15) -- Small wait after TP for server to register
                 end
                 
-                -- Steal (fire both rapidly)
+                -- 2) Steal (original: fire + fire back-to-back)
                 fire("Steal.BeginSteal", f.owner, f.plantId, f.fruitId)
-                task.wait(0.05)
                 fire("Steal.CompleteSteal")
-                
                 Stats.stolen += 1
                 StolenLabel.Text = "Stolen: " .. Stats.stolen .. (f.volume and " (Vol: " .. f.volume .. ")" or "")
-                StatusLabel.Text = "✅ Stole " .. (f.volume and f.volume or "") .. " vol fruit"
-                StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
                 
-                -- Smooth return to base
+                -- 3) Return to base (original)
                 if Settings.stealReturnBase then
                     local base = myBasePos()
-                    if base then
-                        if not smoothTP(base, 0.3) then
-                            local hrp = hrpNow()
-                            if hrp then hrp.CFrame = CFrame.new(base + Vector3.new(0, 3, 0)) end
-                        end
-                        
-                        -- Wait for stolen fruit to bank
+                    local hrp = hrpNow()
+                    if base and hrp then
+                        hrp.CFrame = CFrame.new(base + Vector3.new(0, 4, 0))
                         local t0 = os.clock()
                         while LocalPlayer:GetAttribute("CarryingStolenFruit") 
-                            and os.clock() - t0 < 2 
+                            and os.clock() - t0 < 3 
                             and Settings.autoSteal do
-                            task.wait(0.1)
+                            task.wait(0.15)
                         end
                     end
                 end
@@ -474,4 +452,4 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
 CloseBtn.MouseButton1Click:Connect(unload)
 
-print("🌙 St3al at Night loaded | Smooth TP | High Volume ESP | Drag to move")
+print("🌙 St3al at Night loaded | Original steal logic | High Volume ESP >750 | Owner check")
