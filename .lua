@@ -38,7 +38,7 @@ local function fire(path, ...)
     return true, res
 end
 
--- // ========== WORLD HELPERS (original) ========== \\ --
+-- // ========== WORLD HELPERS ========== \\ --
 local function myPlot()
     local id = LocalPlayer:GetAttribute("PlotId")
     local gardens = Workspace:FindFirstChild("Gardens")
@@ -76,42 +76,67 @@ local function isNight()
     return n and n.Value == true
 end
 
+-- ========== BLACKLIST ========== --
+local BLACKLIST = { "Bamboo" }
+
+local function isBlacklisted(model)
+    if not model then return false end
+    local name = model.Name
+    for _, banned in ipairs(BLACKLIST) do
+        if name:find(banned) then return true end
+    end
+    -- Also check parent names up the tree
+    local parent = model.Parent
+    while parent and parent ~= Workspace do
+        for _, banned in ipairs(BLACKLIST) do
+            if parent.Name:find(banned) then return true end
+        end
+        parent = parent.Parent
+    end
+    return false
+end
+
 -- ========== OWNER IN GARDEN CHECK ========== --
 local function isOwnerInGarden(ownerUserId)
     if not ownerUserId or ownerUserId == 0 then return false end
-    local gardens = Workspace:FindFirstChild("Gardens")
-    if not gardens then return false end
     
+    local player = nil
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr.UserId == ownerUserId then
-            local char = plr.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return false end
-            
-            for _, tag in ipairs({ "GardenTotalArea", "GardenZone" }) do
-                for _, p in ipairs(CollectionService:GetTagged(tag)) do
-                    if p:IsA("BasePart") then
-                        for _, plot in ipairs(gardens:GetChildren()) do
-                            if plot.Name:sub(1, 4) == "Plot" and p:IsDescendantOf(plot) then
-                                local plotId = tonumber(plot.Name:sub(5))
-                                if plotId and plr:GetAttribute("PlotId") == plotId then
-                                    local pos = hrp.Position
-                                    local min = p.Position - p.Size / 2
-                                    local max = p.Position + p.Size / 2
-                                    if pos.X >= min.X and pos.X <= max.X and
-                                       pos.Y >= min.Y and pos.Y <= max.Y and
-                                       pos.Z >= min.Z and pos.Z <= max.Z then
-                                        return true
-                                    end
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            return false
+            player = plr
+            break
         end
     end
+    if not player then return false end
+    
+    local char = player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    local plotId = player:GetAttribute("PlotId")
+    if not plotId then return false end
+    
+    local gardens = Workspace:FindFirstChild("Gardens")
+    if not gardens then return false end
+    local plot = gardens:FindFirstChild("Plot" .. tostring(plotId))
+    if not plot then return false end
+    
+    for _, tag in ipairs({ "GardenTotalArea", "GardenZone" }) do
+        for _, zone in ipairs(CollectionService:GetTagged(tag)) do
+            if zone:IsA("BasePart") and zone:IsDescendantOf(plot) then
+                local pos = hrp.Position
+                local zonePos = zone.Position
+                local halfSize = zone.Size / 2
+                
+                if pos.X >= zonePos.X - halfSize.X and pos.X <= zonePos.X + halfSize.X and
+                   pos.Y >= zonePos.Y - halfSize.Y and pos.Y <= zonePos.Y + halfSize.Y and
+                   pos.Z >= zonePos.Z - halfSize.Z and pos.Z <= zonePos.Z + halfSize.Z then
+                    return true
+                end
+            end
+        end
+    end
+    
     return false
 end
 
@@ -126,7 +151,7 @@ local HIGH_VOLUME = 750
 
 -- ========================================== --
 
--- // ========== STEALABLE (original + owner check + volume) ========== \\ --
+-- // ========== STEALABLE ========== \\ --
 local function stealable(onlyHighValue)
     local out = {}
     for _, pr in ipairs(CollectionService:GetTagged("StealPrompt")) do
@@ -134,16 +159,21 @@ local function stealable(onlyHighValue)
             local m = promptCarrier(pr)
             local pid = m and m:GetAttribute("PlantId")
             if pid then
+                -- SKIP BLACKLISTED (Bamboo)
+                if isBlacklisted(m) then
+                    continue
+                end
+                
                 local owner = tonumber(m:GetAttribute("UserId")) or 0
                 
-                -- NEW: Skip if owner is IN their garden
+                -- Skip if owner is IN their garden
                 if owner ~= 0 and isOwnerInGarden(owner) then
                     continue
                 end
                 
                 local volume = getFruitVolume(m)
                 
-                -- NEW: Only high volume if enabled
+                -- Only high volume if enabled
                 if onlyHighValue and volume < HIGH_VOLUME then
                     continue
                 end
@@ -185,8 +215,11 @@ local function createFruitESP(model)
     if not model or not model.Parent then return end
     if FruitESPObjects[model] then return end
     
+    -- SKIP BLACKLISTED IN ESP TOO
+    if isBlacklisted(model) then return end
+    
     local volume = getFruitVolume(model)
-    if volume < HIGH_VOLUME then return end -- Only >750
+    if volume < HIGH_VOLUME then return end
     
     local adornee = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
     if not adornee then
@@ -363,7 +396,7 @@ task.spawn(function()
     end
 end)
 
--- // ========== MAIN STEAL LOOP (ORIGINAL LOGIC) ========== \\ --
+-- // ========== MAIN STEAL LOOP ========== \\ --
 task.spawn(function()
     while true do
         if Settings.autoSteal then
@@ -388,7 +421,15 @@ task.spawn(function()
             for _, f in ipairs(targets) do
                 if not (Settings.autoSteal and isNight()) then break end
                 
-                -- 1) Teleport to fruit (original)
+                -- RE-CHECK: Owner might have returned
+                if f.owner ~= 0 and isOwnerInGarden(f.owner) then
+                    StatusLabel.Text = "⏭️ Skipped — owner returned"
+                    StatusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+                    task.wait(0.3)
+                    continue
+                end
+                
+                -- 1) Teleport to fruit
                 if Settings.stealTeleport and f.pos then
                     local hrp = hrpNow()
                     if hrp then
@@ -397,13 +438,13 @@ task.spawn(function()
                     end
                 end
                 
-                -- 2) Steal (original: fire + fire back-to-back)
+                -- 2) Steal
                 fire("Steal.BeginSteal", f.owner, f.plantId, f.fruitId)
                 fire("Steal.CompleteSteal")
                 Stats.stolen += 1
                 StolenLabel.Text = "Stolen: " .. Stats.stolen .. (f.volume and " (Vol: " .. f.volume .. ")" or "")
                 
-                -- 3) Return to base (original)
+                -- 3) Return to base
                 if Settings.stealReturnBase then
                     local base = myBasePos()
                     local hrp = hrpNow()
@@ -452,4 +493,4 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
 CloseBtn.MouseButton1Click:Connect(unload)
 
-print("🌙 St3al at Night loaded | Original steal logic | High Volume ESP >750 | Owner check")
+print("🌙 St3al at Night loaded | Bamboo blacklisted | Owner check | High Volume ESP >750")
