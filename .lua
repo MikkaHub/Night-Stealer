@@ -76,26 +76,6 @@ local function isNight()
     return n and n.Value == true
 end
 
--- ========== BLACKLIST ========== --
-local BLACKLIST = { "Bamboo" }
-
-local function isBlacklisted(model)
-    if not model then return false end
-    local name = model.Name
-    for _, banned in ipairs(BLACKLIST) do
-        if name:find(banned) then return true end
-    end
-    -- Also check parent names up the tree
-    local parent = model.Parent
-    while parent and parent ~= Workspace do
-        for _, banned in ipairs(BLACKLIST) do
-            if parent.Name:find(banned) then return true end
-        end
-        parent = parent.Parent
-    end
-    return false
-end
-
 -- ========== OWNER IN GARDEN CHECK ========== --
 local function isOwnerInGarden(ownerUserId)
     if not ownerUserId or ownerUserId == 0 then return false end
@@ -125,20 +105,37 @@ local function isOwnerInGarden(ownerUserId)
         for _, zone in ipairs(CollectionService:GetTagged(tag)) do
             if zone:IsA("BasePart") and zone:IsDescendantOf(plot) then
                 local pos = hrp.Position
-                local zonePos = zone.Position
-                local halfSize = zone.Size / 2
-                
-                if pos.X >= zonePos.X - halfSize.X and pos.X <= zonePos.X + halfSize.X and
-                   pos.Y >= zonePos.Y - halfSize.Y and pos.Y <= zonePos.Y + halfSize.Y and
-                   pos.Z >= zonePos.Z - halfSize.Z and pos.Z <= zonePos.Z + halfSize.Z then
+                local zp = zone.Position
+                local hs = zone.Size / 2
+                if pos.X >= zp.X - hs.X and pos.X <= zp.X + hs.X and
+                   pos.Y >= zp.Y - hs.Y and pos.Y <= zp.Y + hs.Y and
+                   pos.Z >= zp.Z - hs.Z and pos.Z <= zp.Z + hs.Z then
                     return true
                 end
             end
         end
     end
-    
     return false
 end
+
+-- ========== GET PLANT NAME FROM MODEL ========== --
+local function getPlantName(model)
+    if not model then return "Unknown" end
+    -- Try common attribute names for plant type
+    local name = model:GetAttribute("PlantName") 
+        or model:GetAttribute("SeedName") 
+        or model:GetAttribute("Type")
+        or model:GetAttribute("Name")
+        or model.Name
+    return tostring(name)
+end
+
+-- ========== BLACKLIST ========== --
+local BLACKLIST = {
+    ["Bamboo"] = true,
+    ["Carrot"] = true,
+    -- Add more here: ["PlantName"] = true
+}
 
 -- ========== GET FRUIT VOLUME ========== --
 local function getFruitVolume(model)
@@ -159,11 +156,6 @@ local function stealable(onlyHighValue)
             local m = promptCarrier(pr)
             local pid = m and m:GetAttribute("PlantId")
             if pid then
-                -- SKIP BLACKLISTED (Bamboo)
-                if isBlacklisted(m) then
-                    continue
-                end
-                
                 local owner = tonumber(m:GetAttribute("UserId")) or 0
                 
                 -- Skip if owner is IN their garden
@@ -171,9 +163,13 @@ local function stealable(onlyHighValue)
                     continue
                 end
                 
-                local volume = getFruitVolume(m)
+                -- Skip blacklisted plants
+                local plantName = getPlantName(m)
+                if BLACKLIST[plantName] then
+                    continue
+                end
                 
-                -- Only high volume if enabled
+                local volume = getFruitVolume(m)
                 if onlyHighValue and volume < HIGH_VOLUME then
                     continue
                 end
@@ -192,6 +188,7 @@ local function stealable(onlyHighValue)
                     fruitId = tostring(m:GetAttribute("FruitId") or ""),
                     pos = pos,
                     volume = volume,
+                    plantName = plantName,
                 }
             end
         end
@@ -204,7 +201,7 @@ local function hrpNow()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
--- // ========== HIGH VOLUME FRUIT ESP (BLOCK ONLY >750) ========== \\ --
+-- // ========== HIGH VOLUME FRUIT ESP (>750) ========== \\ --
 local FruitESPFolder = Instance.new("Folder")
 FruitESPFolder.Name = "HighFruitESP"
 FruitESPFolder.Parent = Workspace
@@ -214,9 +211,6 @@ local FruitESPObjects = {}
 local function createFruitESP(model)
     if not model or not model.Parent then return end
     if FruitESPObjects[model] then return end
-    
-    -- SKIP BLACKLISTED IN ESP TOO
-    if isBlacklisted(model) then return end
     
     local volume = getFruitVolume(model)
     if volume < HIGH_VOLUME then return end
@@ -238,9 +232,9 @@ local function createFruitESP(model)
     box.Adornee = adornee
     box.Parent = FruitESPFolder
     
-    if volume > 1500 then box.Color3 = Color3.fromRGB(255, 215, 0)      -- Gold
-    elseif volume > 1000 then box.Color3 = Color3.fromRGB(255, 100, 100) -- Red
-    else box.Color3 = Color3.fromRGB(100, 255, 100) end                  -- Green
+    if volume > 1500 then box.Color3 = Color3.fromRGB(255, 215, 0)
+    elseif volume > 1000 then box.Color3 = Color3.fromRGB(255, 100, 100)
+    else box.Color3 = Color3.fromRGB(100, 255, 100) end
     
     FruitESPObjects[model] = { box = box, model = model }
 end
@@ -269,7 +263,6 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.Parent = game:GetService("CoreGui") or LocalPlayer:WaitForChild("PlayerGui")
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Name = "Main"
 MainFrame.Size = UDim2.new(0, 280, 0, 280)
 MainFrame.Position = UDim2.new(0.5, -140, 0.5, -140)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
@@ -327,7 +320,7 @@ StatusLabel.Parent = MainFrame
 
 local StolenLabel = Instance.new("TextLabel")
 StolenLabel.Size = UDim2.new(1, -20, 0, 20)
-StolenLabel.Position = UDim2.new(0, 10, 0, 278)
+StolenLabel.Position = UDim2.new(0, 10, 0, 238)
 StolenLabel.BackgroundTransparency = 1
 StolenLabel.Text = "Stolen: 0"
 StolenLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -337,7 +330,7 @@ StolenLabel.TextXAlignment = Enum.TextXAlignment.Center
 StolenLabel.Parent = MainFrame
 
 -- // ========== STATE ========== \\ --
-local Settings = {
+local S = {
     autoSteal = false,
     stealHighValue = true,
     stealTeleport = true,
@@ -351,36 +344,36 @@ local Stats = { stolen = 0 }
 -- // ========== TOGGLE LOGIC ========== \\ --
 local function updateToggle(btn, state)
     local key = btn.Name:gsub("[^a-zA-Z]", ""):lower()
-    Settings[key] = state
+    S[key] = state
     btn.BackgroundColor3 = state and Color3.fromRGB(0, 170, 80) or Color3.fromRGB(60, 60, 70)
     btn.Text = (state and "✅ " or "❌ ") .. btn.Name
 end
 
 StealToggle.MouseButton1Click:Connect(function()
-    Settings.autoSteal = not Settings.autoSteal
-    updateToggle(StealToggle, Settings.autoSteal)
+    S.autoSteal = not S.autoSteal
+    updateToggle(StealToggle, S.autoSteal)
 end)
 
 HighValueToggle.MouseButton1Click:Connect(function()
-    Settings.stealHighValue = not Settings.stealHighValue
-    updateToggle(HighValueToggle, Settings.stealHighValue)
+    S.stealHighValue = not S.stealHighValue
+    updateToggle(HighValueToggle, S.stealHighValue)
 end)
 
 TPToggle.MouseButton1Click:Connect(function()
-    Settings.stealTeleport = not Settings.stealTeleport
-    updateToggle(TPToggle, Settings.stealTeleport)
+    S.stealTeleport = not S.stealTeleport
+    updateToggle(TPToggle, S.stealTeleport)
 end)
 
 ReturnToggle.MouseButton1Click:Connect(function()
-    Settings.stealReturnBase = not Settings.stealReturnBase
-    updateToggle(ReturnToggle, Settings.stealReturnBase)
+    S.stealReturnBase = not S.stealReturnBase
+    updateToggle(ReturnToggle, S.stealReturnBase)
 end)
 
 ESPToggle.MouseButton1Click:Connect(function()
-    Settings.espEnabled = not Settings.espEnabled
-    updateToggle(ESPToggle, Settings.espEnabled)
-    FruitESPFolder.Enabled = Settings.espEnabled
-    if not Settings.espEnabled then
+    S.espEnabled = not S.espEnabled
+    updateToggle(ESPToggle, S.espEnabled)
+    FruitESPFolder.Enabled = S.espEnabled
+    if not S.espEnabled then
         for _, esp in pairs(FruitESPObjects) do
             pcall(function() esp.box:Destroy() end)
         end
@@ -391,15 +384,15 @@ end)
 -- // ========== ESP UPDATE LOOP ========== \\ --
 task.spawn(function()
     while true do
-        if Settings.espEnabled then scanFruitESP() end
+        if S.espEnabled then scanFruitESP() end
         task.wait(2)
     end
 end)
 
--- // ========== MAIN STEAL LOOP ========== \\ --
+-- // ========== MAIN STEAL LOOP (EXACT ORIGINAL LOGIC) ========== \\ --
 task.spawn(function()
     while true do
-        if Settings.autoSteal then
+        if S.autoSteal then
             if not isNight() then
                 StatusLabel.Text = "☀️ Daytime — waiting..."
                 StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
@@ -407,9 +400,9 @@ task.spawn(function()
                 continue
             end
             
-            local targets = stealable(Settings.stealHighValue)
+            local targets = stealable(S.stealHighValue)
             if #targets == 0 then
-                StatusLabel.Text = "🔍 No " .. (Settings.stealHighValue and "high value " or "") .. "targets"
+                StatusLabel.Text = "🔍 No " .. (S.stealHighValue and "high value " or "") .. "targets"
                 StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
                 task.wait(1.5)
                 continue
@@ -419,18 +412,18 @@ task.spawn(function()
             StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
             
             for _, f in ipairs(targets) do
-                if not (Settings.autoSteal and isNight()) then break end
+                if not (S.autoSteal and isNight()) then break end
                 
-                -- RE-CHECK: Owner might have returned
+                -- Re-check owner before each steal
                 if f.owner ~= 0 and isOwnerInGarden(f.owner) then
-                    StatusLabel.Text = "⏭️ Skipped — owner returned"
+                    StatusLabel.Text = "⏭️ Owner returned — skipping"
                     StatusLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
                     task.wait(0.3)
                     continue
                 end
                 
-                -- 1) Teleport to fruit
-                if Settings.stealTeleport and f.pos then
+                -- 1) Teleport to fruit (proximity is server-gated)
+                if S.stealTeleport and f.pos then
                     local hrp = hrpNow()
                     if hrp then
                         hrp.CFrame = CFrame.new(f.pos + Vector3.new(0, 4, 0))
@@ -438,14 +431,14 @@ task.spawn(function()
                     end
                 end
                 
-                -- 2) Steal
+                -- 2) Steal: Begin + Complete back-to-back (original)
                 fire("Steal.BeginSteal", f.owner, f.plantId, f.fruitId)
                 fire("Steal.CompleteSteal")
                 Stats.stolen += 1
-                StolenLabel.Text = "Stolen: " .. Stats.stolen .. (f.volume and " (Vol: " .. f.volume .. ")" or "")
+                StolenLabel.Text = "Stolen: " .. Stats.stolen .. (f.plantName and " (" .. f.plantName .. ")" or "")
                 
-                -- 3) Return to base
-                if Settings.stealReturnBase then
+                -- 3) Carry it home: standing in own garden zone banks it
+                if S.stealReturnBase then
                     local base = myBasePos()
                     local hrp = hrpNow()
                     if base and hrp then
@@ -453,14 +446,14 @@ task.spawn(function()
                         local t0 = os.clock()
                         while LocalPlayer:GetAttribute("CarryingStolenFruit") 
                             and os.clock() - t0 < 3 
-                            and Settings.autoSteal do
+                            and S.autoSteal do
                             task.wait(0.15)
                         end
                     end
                 end
                 
-                if (Settings.stealDelay or 0) > 0 then
-                    task.wait(Settings.stealDelay)
+                if (S.stealDelay or 0) > 0 then
+                    task.wait(S.stealDelay)
                 end
             end
         else
@@ -473,7 +466,7 @@ end)
 
 -- // ========== CLEANUP ========== \\ --
 local function unload()
-    Settings.autoSteal = false
+    S.autoSteal = false
     FruitESPFolder:Destroy()
     ScreenGui:Destroy()
 end
@@ -493,4 +486,4 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 
 CloseBtn.MouseButton1Click:Connect(unload)
 
-print("🌙 St3al at Night loaded | Bamboo blacklisted | Owner check | High Volume ESP >750")
+print("🌙 St3al at Night loaded | Blacklist: Bamboo, Carrot | Owner check | High Vol ESP >750")
