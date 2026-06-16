@@ -1,6 +1,6 @@
--- GAG 2 Visual Pet Spawner v4
--- CORRECT: Creates fake slot objects and uses the REAL positioning system
--- Based on complete PetVisualController source analysis
+-- GAG 2 Visual Pet Spawner v5
+-- FIXED: Animation loading with proper AnimationController setup
+-- FIXED: Handles both ground pets (Idle/Walk) and flyers (Fly/FlyIdle)
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -150,7 +150,6 @@ Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 8)
 local selectedPetName = nil
 local activePets = {}
 local maxPets = 6
-local fakeSlots = {}
 
 -- Dragging
 local dragging = false
@@ -177,7 +176,7 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- Compute Foot Offset (matches v_u_72 exactly)
+-- Compute Foot Offset
 local function computeFootOffset(model)
     local pivotY = model:GetPivot().Position.Y
     local lowest = math.huge
@@ -202,49 +201,22 @@ local function computeFootOffset(model)
     return lowest == math.huge and 0 or pivotY - lowest
 end
 
--- Get or Create Animator (matches v_u_76)
-local function getOrCreateAnimator(model)
-    local animController = model:FindFirstChildOfClass("AnimationController")
-    if not animController then
-        animController = Instance.new("AnimationController")
-        animController.Parent = model
-    end
-    local animator = animController:FindFirstChildOfClass("Animator")
-    if not animator then
-        animator = Instance.new("Animator")
-        animator.Parent = animController
-    end
-    return animator
-end
-
--- Find Animations (matches v_u_86)
-local function findAnimations(model, animNames)
+-- Find Animations on Model (matches v_u_86)
+local function findAnimations(model)
     local anims = {}
     local animFolder = model:FindFirstChild("Animations")
     
-    if animNames then
-        local seen = {}
-        for _, name in pairs(animNames) do
-            if type(name) == "string" and name ~= "" and not seen[name] then
-                seen[name] = true
-                local anim = animFolder and animFolder:FindFirstChild(name) or model:FindFirstChild(name)
-                if anim and anim:IsA("Animation") then
-                    anims[name] = anim
-                end
-            end
-        end
-    else
-        if animFolder then
-            for _, child in pairs(animFolder:GetChildren()) do
-                if child:IsA("Animation") then
-                    anims[child.Name] = child
-                end
-            end
-        end
-        for _, child in pairs(model:GetChildren()) do
+    if animFolder then
+        for _, child in pairs(animFolder:GetChildren()) do
             if child:IsA("Animation") then
                 anims[child.Name] = child
             end
+        end
+    end
+    
+    for _, child in pairs(model:GetChildren()) do
+        if child:IsA("Animation") then
+            anims[child.Name] = child
         end
     end
     
@@ -252,8 +224,7 @@ local function findAnimations(model, animNames)
 end
 
 -- Get Animation Name for State (matches v_u_89)
-local function getAnimNameForState(module, state)
-    local anims = module and module.Animations
+local function getAnimNameForState(anims, state)
     if not anims then return nil end
     
     if state == "idle" then return anims.Idle
@@ -269,8 +240,8 @@ end
 -- Switch Animation State (matches v_u_99)
 local function switchState(petData, newState)
     if newState == "takeoff" then
-        local anims = petData.Module and petData.Module.Animations
-        newState = (anims and not anims.Takeoff) and "flying" or newState
+        local hasTakeoff = petData.Animations and petData.Animations.Takeoff
+        newState = (not hasTakeoff) and "flying" or newState
     end
     
     if petData.CurrentState ~= newState then
@@ -285,12 +256,15 @@ local function switchState(petData, newState)
             end
         end
         
-        local animName = getAnimNameForState(petData.Module, newState)
+        local animName = getAnimNameForState(petData.Animations, newState)
         local track = animName and petData.Tracks[animName]
         
         if track then
             track.Looped = (newState ~= "landing" and newState ~= "takeoff")
             track:Play(track.Looped and 0.2 or 0.05)
+            print("Playing animation: " .. newState .. " (" .. animName.Name .. ")")
+        else
+            print("No animation for state: " .. newState)
         end
     end
 end
@@ -335,41 +309,7 @@ searchBox:GetPropertyChangedSignal("Text"):Connect(function()
     updateList(searchBox.Text)
 end)
 
--- Create Fake Slot (simulates PetPart1-PetPart6)
-local function createFakeSlot(index)
-    local slot = Instance.new("Part")
-    slot.Name = "PetPart" .. index
-    slot.Size = Vector3.new(1, 1, 1)
-    slot.Transparency = 1
-    slot.CanCollide = false
-    slot.CanQuery = false
-    slot.CanTouch = false
-    slot.Anchored = false
-    slot.Parent = workspace
-    
-    -- Slot offsets (matching game pattern: 6 pets in circle)
-    local angle = (index - 1) * (math.pi * 2 / 6)
-    local radius = 4
-    slot:SetAttribute("SlotOffsetX", math.cos(angle) * radius)
-    slot:SetAttribute("SlotOffsetZ", math.sin(angle) * radius)
-    slot:SetAttribute("SlotHeightOffset", 0)
-    
-    return slot
-end
-
--- Create PetTarget Attachment (matches v_u_117)
-local function ensureSlotAttachment(slot, footOffset, pivotCFrame)
-    local attach = slot:FindFirstChild("PetTarget")
-    if not attach then
-        attach = Instance.new("Attachment")
-        attach.Name = "PetTarget"
-        attach.Parent = slot
-    end
-    attach.CFrame = CFrame.new(0, footOffset, 0) * (pivotCFrame or CFrame.identity)
-    return attach
-end
-
--- Spawn Pet (CORRECT - matches BuildSlotModel exactly)
+-- Spawn Pet
 local function spawnVisualPet(petName)
     if #activePets >= maxPets then
         warn("Max pets reached (6/6)")
@@ -387,9 +327,11 @@ local function spawnVisualPet(petName)
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
     
-    -- Clone and setup (matches v_u_111)
+    -- Clone pet
     local pet = template:Clone()
+    print("Cloned: " .. petName)
     
+    -- Setup parts
     for _, part in pairs(pet:GetDescendants()) do
         if part:IsA("BasePart") then
             part.Anchored = false
@@ -400,105 +342,138 @@ local function spawnVisualPet(petName)
         end
     end
     
-    -- Set PrimaryPart (matches source fallback)
+    -- Set PrimaryPart
     local primary = pet.PrimaryPart
     if not (primary and primary.Parent) then
         primary = pet:FindFirstChild("Torso") or pet:FindFirstChild("RootPart") or pet:FindFirstChildWhichIsA("BasePart")
         if primary then
             pet.PrimaryPart = primary
+            print("PrimaryPart set to: " .. primary.Name)
         end
     end
     
     if not primary then
         pet:Destroy()
-        warn("No PrimaryPart found")
+        warn("No PrimaryPart!")
         return
     end
     
-    -- Compute pivot CFrame (matches source v134)
-    local speciesPivot = CFrame.identity -- Simplified, could use module data
-    
-    -- Compute foot offset (matches v_u_72)
+    -- Compute foot offset
     local footOffset = computeFootOffset(pet)
+    print("Foot offset: " .. footOffset)
     
-    -- Scale (default 1)
-    local scale = 1
-    if scale ~= 1 then
-        pet:ScaleTo(scale)
+    -- CRITICAL: Create AnimationController BEFORE parenting to workspace
+    -- This ensures animations can load properly
+    local animController = Instance.new("AnimationController")
+    animController.Parent = pet
+    
+    local animator = Instance.new("Animator")
+    animator.Parent = animController
+    
+    print("AnimationController created")
+    
+    -- Parent to workspace FIRST so animations can load
+    pet.Parent = workspace
+    print("Parented to workspace")
+    
+    -- Now find and load animations
+    local animations = findAnimations(pet)
+    print("Found " .. #animations .. " animations")
+    
+    for name, anim in pairs(animations) do
+        print("  - " .. name .. ": " .. anim.AnimationId)
     end
     
-    -- Create fake slot
+    local tracks = {}
+    
+    -- Load animations with error handling
+    for name, anim in pairs(animations) do
+        local success, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+        
+        if success and track then
+            track.Looped = true
+            track.Priority = Enum.AnimationPriority.Movement
+            tracks[name] = track
+            print("Loaded animation: " .. name)
+        else
+            warn("Failed to load animation: " .. name .. " - " .. tostring(track))
+        end
+    end
+    
+    -- Determine if flyer (has Fly animation)
+    local isFlyer = tracks.Fly ~= nil
+    print("Is flyer: " .. tostring(isFlyer))
+    
+    -- Determine initial state
+    local initialState = isFlyer and "flying" or "idle"
+    local initialAnim = getAnimNameForState(animations, initialState)
+    
+    if initialAnim and tracks[initialAnim.Name] then
+        tracks[initialAnim.Name]:Play(0.2)
+        print("Playing initial: " .. initialState)
+    end
+    
+    -- Anchor primary
+    primary.Anchored = true
+    
+    -- Position in circle
     local index = #activePets + 1
-    local slot = createFakeSlot(index)
+    local angle = (index - 1) * (math.pi * 2 / 6)
+    local radius = 4
     
-    -- Create PetTarget attachment (matches v_u_117)
-    local slotAttachment = ensureSlotAttachment(slot, footOffset, speciesPivot)
+    local startPos = hrp.Position + Vector3.new(
+        math.cos(angle) * radius,
+        footOffset + 2,
+        math.sin(angle) * radius
+    )
     
-    -- Create PetPivot on primary (matches source)
+    -- Create slot part for positioning
+    local slot = Instance.new("Part")
+    slot.Name = "PetSlot" .. index
+    slot.Size = Vector3.new(1, 1, 1)
+    slot.Transparency = 1
+    slot.CanCollide = false
+    slot.CanQuery = false
+    slot.CanTouch = false
+    slot.Anchored = false
+    slot.CFrame = CFrame.new(startPos)
+    slot.Parent = workspace
+    
+    -- Create PetTarget attachment
+    local slotAttach = Instance.new("Attachment")
+    slotAttach.Name = "PetTarget"
+    slotAttach.CFrame = CFrame.new(0, footOffset, 0)
+    slotAttach.Parent = slot
+    
+    -- Create PetPivot on primary
     local petPivot = Instance.new("Attachment")
     petPivot.Name = "PetPivot"
     petPivot.CFrame = primary.CFrame:Inverse() * pet:GetPivot()
     petPivot.Parent = primary
     
-    -- Anchor primary (CRITICAL - matches source)
-    primary.Anchored = true
-    
     -- Initial position
-    local startPos = hrp.Position + Vector3.new(
-        math.cos((index - 1) * math.pi * 2 / 6) * 4,
-        0,
-        math.sin((index - 1) * math.pi * 2 / 6) * 4
-    )
-    slot.CFrame = CFrame.new(startPos)
+    pet:PivotTo(slot.CFrame * slotAttach.CFrame)
+    print("Initial position set")
     
-    -- Parent to workspace (not _PetVisualClient - we need slot to exist)
-    pet.Parent = workspace
-    
-    -- Initial PivotTo (matches source)
-    pet:PivotTo(slot.CFrame * slotAttachment.CFrame)
-    
-    -- Setup animations
-    local animator = getOrCreateAnimator(pet)
-    local animations = findAnimations(pet)
-    local tracks = {}
-    
-    for name, anim in pairs(animations) do
-        local success, track = pcall(function()
-            return animator:LoadAnimation(anim)
-        end)
-        if success and track then
-            track.Looped = true
-            track.Priority = Enum.AnimationPriority.Movement
-            tracks[name] = track
-        end
-    end
-    
-    -- Play idle
-    if tracks.Idle then
-        tracks.Idle:Play(0.2)
-    end
-    
-    -- Pet data (matches v_u_155 structure)
+    -- Pet data
     local petData = {
         Model = pet,
         Primary = primary,
         Slot = slot,
-        SlotAttachment = slotAttachment,
+        SlotAttachment = slotAttach,
         PetAttachment = petPivot,
         FootOffset = footOffset,
-        SpeciesPivotCFrame = speciesPivot,
         Tracks = tracks,
-        CurrentState = "",
-        AnimState = "idle",
-        IsFlyer = false, -- Could check module data
+        Animations = animations,
+        CurrentState = initialState,
+        IsFlyer = isFlyer,
         LastYaw = 0,
-        LastChaseGroundY = startPos.Y,
         SmoothedSpeed = 0,
-        LastVisualPos = startPos,
-        LastVisualTime = os.clock(),
     }
     
-    -- Position update (matches Heartbeat logic from source)
+    -- Position update
     local connection
     
     local function updatePosition(dt)
@@ -512,26 +487,19 @@ local function spawnVisualPet(petName)
         local h = char:FindFirstChild("HumanoidRootPart")
         if not h then return end
         
-        -- Get slot offsets
-        local offsetX = slot:GetAttribute("SlotOffsetX") or 0
-        local offsetZ = slot:GetAttribute("SlotOffsetZ") or 0
-        local heightOffset = slot:GetAttribute("SlotHeightOffset") or 0
+        local playerPos = h.Position
+        local lookDir = h.CFrame.LookVector
+        local flatLook = Vector3.new(lookDir.X, 0, lookDir.Z).Unit
         
-        -- Compute target position (matches SnapLocalPetsToFollow)
-        local playerCF = h.CFrame
-        local lookVec = playerCF.LookVector
-        local flatLook = Vector3.new(lookVec.X, 0, lookVec.Z)
-        local lookDir = flatLook.Magnitude < 0.0001 and Vector3.new(0, 0, -1) or flatLook.Unit
-        local playerPos = playerCF.Position
+        local targetPos = playerPos + Vector3.new(
+            math.cos(angle) * radius,
+            0,
+            math.sin(angle) * radius
+        )
         
-        local targetCF = CFrame.lookAt(playerPos, playerPos + lookDir) * CFrame.new(offsetX, -2.5, offsetZ)
-        local targetPos = targetCF.Position
-        
-        -- Ground height (simplified - just use player Y)
         local groundY = playerPos.Y - 3
-        local finalY = groundY + footOffset + heightOffset
+        local finalY = groundY + footOffset + 1.5
         
-        -- Smooth movement (matches source lerp)
         local currentPos = primary.Position
         local dx = targetPos.X - currentPos.X
         local dz = targetPos.Z - currentPos.Z
@@ -551,57 +519,53 @@ local function spawnVisualPet(petName)
             newZ = currentPos.Z + dz * invDist * followSpeed
         end
         
-        -- Smooth Y
         local smoothY = currentPos.Y + (finalY - currentPos.Y) * math.clamp(18 * dt, 0, 1)
         
-        -- Compute yaw (face movement direction or player)
         local moveDir = Vector3.new(newX - currentPos.X, 0, newZ - currentPos.Z)
         local yaw
         if moveDir.Magnitude > 0.0001 then
             local unit = moveDir.Unit
             yaw = math.atan2(-unit.X, -unit.Z)
         else
-            yaw = math.atan2(-lookDir.X, -lookDir.Z)
+            yaw = math.atan2(-flatLook.X, -flatLook.Z)
         end
         
-        -- Smooth yaw
-        local lastYaw = petData.LastYaw or yaw
+        local lastYaw = petData.LastYaw
         local yawDiff = (yaw - lastYaw + math.pi) % (2 * math.pi) - math.pi
         local newYaw = lastYaw + yawDiff * math.clamp(12 * dt, 0, 1)
         petData.LastYaw = newYaw
         
-        -- Apply position (matches source exactly)
         local newPos = Vector3.new(newX, smoothY, newZ)
-        local finalCF = CFrame.new(newPos) * CFrame.Angles(0, newYaw, 0) * speciesPivot
+        local finalCF = CFrame.new(newPos) * CFrame.Angles(0, newYaw, 0)
         
         primary.CFrame = primary.CFrame:Lerp(finalCF, damping)
-        
-        -- Update slot position for tracking
         slot.CFrame = CFrame.new(newPos)
         
-        -- Animation state based on speed
+        -- Animation state
         local moveSpeed = moveDir.Magnitude / math.max(dt, 0.001)
         local smoothSpeed = petData.SmoothedSpeed * (1 - math.clamp(6 * dt, 0, 1)) + moveSpeed * math.clamp(6 * dt, 0, 1)
         petData.SmoothedSpeed = smoothSpeed
         
-        local animState = smoothSpeed > 2 and "walking" or "idle"
-        if animState ~= petData.AnimState then
-            petData.AnimState = animState
-            switchState(petData, animState)
+        local animState
+        if petData.IsFlyer then
+            animState = "flying" -- Flyers always fly
+        else
+            animState = smoothSpeed > 2 and "walking" or "idle"
         end
         
-        petData.LastVisualPos = newPos
-        petData.LastVisualTime = os.clock()
+        if animState ~= petData.CurrentState then
+            petData.CurrentState = animState
+            switchState(petData, animState)
+        end
     end
     
     connection = RunService.Heartbeat:Connect(updatePosition)
     petData.Connection = connection
     
     table.insert(activePets, petData)
-    table.insert(fakeSlots, slot)
     
     infoLabel.Text = "Selected: " .. (selectedPetName or "None") .. " | Active: " .. #activePets .. "/6"
-    print("Spawned: " .. petName .. " at slot " .. index)
+    print("Spawn complete! Active: " .. #activePets)
 end
 
 -- Despawn All
@@ -621,9 +585,8 @@ local function despawnAllPets()
         end
     end
     activePets = {}
-    fakeSlots = {}
     infoLabel.Text = "Selected: " .. (selectedPetName or "None") .. " | Active: 0/6"
-    print("All pets despawned")
+    print("All despawned")
 end
 
 -- Events
@@ -647,9 +610,8 @@ openBtn.MouseButton1Click:Connect(function()
     openBtn.Visible = false
 end)
 
--- Cleanup
 player.CharacterAdded:Connect(despawnAllPets)
 
-print("GAG 2 Visual Pet Spawner v4 LOADED")
-print("CORRECT: Uses fake slots + Primary.CFrame lerp (matches source)")
-print("Templates: ReplicatedStorage.Assets.Pets")
+print("GAG 2 Visual Pet Spawner v5 LOADED")
+print("FIXED: AnimationController created before parenting")
+print("FIXED: Proper animation state switching")
