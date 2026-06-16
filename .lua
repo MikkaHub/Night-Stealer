@@ -1,6 +1,6 @@
--- GAG 2 Visual Pet Spawner v6
--- FIXED: Animation search uses GetDescendants() to find ALL animations anywhere in the model
--- FIXED: More robust animation loading with retry
+-- GAG 2 Visual Pet Spawner v7
+-- FIXED: Creates fresh Animation objects with rbxassetid:// IDs
+-- Animation IDs extracted from game templates
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -10,14 +10,102 @@ local UserInputService = game:GetService("UserInputService")
 local player = Players.LocalPlayer
 local petsFolder = ReplicatedStorage:WaitForChild("Assets"):WaitForChild("Pets")
 
--- GUI Setup
+-- ============================================
+-- ANIMATION DATABASE (from game templates)
+-- ============================================
+local AnimationIDs = {
+    -- Ground pets (Idle + Walk)
+    Bee = {
+        Idle = "rbxassetid://109795009337209",
+        Walk = "rbxassetid://109795009337209" -- Bee only has Fly, using as Idle
+    },
+    Bunny = {
+        Idle = "rbxassetid://121459629761512",
+        Walk = "rbxassetid://117566215918221"
+    },
+    Frog = {
+        Idle = "rbxassetid://82563725402411",
+        Walk = "rbxassetid://132064867962784"
+    },
+    Monkey = {
+        Idle = "rbxassetid://104094355760463",
+        Walk = "rbxassetid://132103700395821"
+    },
+    Unicorn = {
+        Idle = "rbxassetid://134159688524179",
+        Walk = "rbxassetid://116837103420427"
+    },
+    Deer = {
+        Idle = "rbxassetid://131429946000727",
+        Walk = "rbxassetid://120837304414160"
+    },
+    Raccoon = {
+        Idle = "rbxassetid://124925826236010",
+        Walk = "rbxassetid://101328116296682"
+    },
+    
+    -- Flyers (Fly + FlyIdle + GroundIdle + Takeoff + Land)
+    Dragonfly = {
+        Fly = "rbxassetid://93715378335632",
+        FlyIdle = "rbxassetid://93715378335632",
+        GroundIdle = "rbxassetid://93715378335632",
+        Takeoff = "rbxassetid://93715378335632",
+        Land = "rbxassetid://93715378335632"
+    },
+    GoldenDragonfly = {
+        Fly = "rbxassetid://135083399812720",
+        FlyIdle = "rbxassetid://135083399812720",
+        GroundIdle = "rbxassetid://139363399953436",
+        Takeoff = "rbxassetid://135083399812720",
+        Land = "rbxassetid://135083399812720"
+    },
+    BlackDragon = {
+        Fly = "rbxassetid://86837770865641",
+        FlyIdle = "rbxassetid://108266203305755",
+        GroundIdle = "rbxassetid://108266203305755",
+        Takeoff = "rbxassetid://79209347206628",
+        Land = "rbxassetid://114194676864422"
+    },
+    Robin = {
+        Fly = "rbxassetid://86837770865641",
+        FlyIdle = "rbxassetid://108266203305755",
+        GroundIdle = "rbxassetid://108266203305755",
+        Takeoff = "rbxassetid://79209347206628",
+        Land = "rbxassetid://114194676864422"
+    },
+    Owl = {
+        Fly = "rbxassetid://104036222274522",
+        FlyIdle = "rbxassetid://104036222274522",
+        GroundIdle = "rbxassetid://137617816724297",
+        Takeoff = "rbxassetid://76670699414141",
+        Land = "rbxassetid://78772100085627"
+    },
+    IceSerpent = {
+        Fly = "rbxassetid://126440817632252",
+        FlyIdle = "rbxassetid://98913439334490",
+        GroundIdle = "rbxassetid://126440817632252",
+        Takeoff = "rbxassetid://126440817632252",
+        Land = "rbxassetid://126440817632252",
+        Breathe = "rbxassetid://111271274889377"
+    }
+}
+
+-- Default fallback animations (if pet not in database)
+local DefaultAnimations = {
+    Idle = "rbxassetid://121459629761512",  -- Bunny idle
+    Walk = "rbxassetid://117566215918221",  -- Bunny walk
+    Fly = "rbxassetid://93715378335632"     -- Dragonfly fly
+}
+
+-- ============================================
+-- GUI SETUP
+-- ============================================
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "VisualPetSpawner"
 screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
--- Main Frame
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 340, 0, 480)
 mainFrame.Position = UDim2.new(0.5, -170, 0.5, -240)
@@ -27,7 +115,6 @@ mainFrame.Parent = screenGui
 
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 
--- Title
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, 40)
 titleBar.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
@@ -59,7 +146,6 @@ closeBtn.Parent = titleBar
 
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
 
--- Search
 local searchBox = Instance.new("TextBox")
 searchBox.Size = UDim2.new(1, -20, 0, 30)
 searchBox.Position = UDim2.new(0, 10, 0, 50)
@@ -74,7 +160,6 @@ searchBox.Parent = mainFrame
 
 Instance.new("UICorner", searchBox).CornerRadius = UDim.new(0, 6)
 
--- Pet List
 local scrollFrame = Instance.new("ScrollingFrame")
 scrollFrame.Size = UDim2.new(1, -20, 1, -180)
 scrollFrame.Position = UDim2.new(0, 10, 0, 90)
@@ -90,7 +175,6 @@ local listLayout = Instance.new("UIListLayout")
 listLayout.Padding = UDim.new(0, 4)
 listLayout.Parent = scrollFrame
 
--- Info
 local infoLabel = Instance.new("TextLabel")
 infoLabel.Size = UDim2.new(1, -20, 0, 20)
 infoLabel.Position = UDim2.new(0, 10, 1, -80)
@@ -102,7 +186,6 @@ infoLabel.Font = Enum.Font.Gotham
 infoLabel.TextXAlignment = Enum.TextXAlignment.Left
 infoLabel.Parent = mainFrame
 
--- Buttons
 local btnFrame = Instance.new("Frame")
 btnFrame.Size = UDim2.new(1, -20, 0, 35)
 btnFrame.Position = UDim2.new(0, 10, 1, -55)
@@ -132,7 +215,6 @@ despawnBtn.Parent = btnFrame
 
 Instance.new("UICorner", despawnBtn).CornerRadius = UDim.new(0, 6)
 
--- Open Button
 local openBtn = Instance.new("TextButton")
 openBtn.Size = UDim2.new(0, 130, 0, 40)
 openBtn.Position = UDim2.new(0, 15, 0, 15)
@@ -202,30 +284,55 @@ local function computeFootOffset(model)
 end
 
 -- ============================================
--- FIXED: Find Animations using GetDescendants()
+-- CREATE ANIMATIONS FROM IDs (NEW METHOD)
 -- ============================================
-local function findAnimations(model)
+local function createAnimations(petName, petModel)
+    local animData = AnimationIDs[petName] or DefaultAnimations
     local anims = {}
-    local count = 0
+    local tracks = {}
     
-    -- Search ALL descendants, not just direct children
-    for _, desc in ipairs(model:GetDescendants()) do
-        if desc:IsA("Animation") then
-            anims[desc.Name] = desc
-            count = count + 1
-            print("  Found animation: " .. desc.Name .. " | ID: " .. desc.AnimationId)
+    -- Create AnimationController
+    local animController = Instance.new("AnimationController")
+    animController.Parent = petModel
+    
+    local animator = Instance.new("Animator")
+    animator.Parent = animController
+    
+    print("Creating animations for: " .. petName)
+    
+    for animName, animId in pairs(animData) do
+        -- Create fresh Animation object
+        local anim = Instance.new("Animation")
+        anim.Name = animName
+        anim.AnimationId = animId
+        anim.Parent = petModel
+        
+        print("  Created: " .. animName .. " -> " .. animId)
+        
+        -- Load animation
+        local success, track = pcall(function()
+            return animator:LoadAnimation(anim)
+        end)
+        
+        if success and track then
+            track.Looped = true
+            track.Priority = Enum.AnimationPriority.Movement
+            tracks[animName] = track
+            anims[animName] = anim
+            print("    LOADED: " .. animName)
+        else
+            warn("    FAILED: " .. animName .. " - " .. tostring(track))
         end
     end
     
-    print("Total animations found: " .. count)
-    return anims
+    return anims, tracks, animator
 end
 
--- Get Animation Name for State
-local function getAnimNameForState(anims, state)
+-- Get Animation for State
+local function getAnimForState(anims, state)
     if not anims then return nil end
     
-    if state == "idle" then return anims.Idle
+    if state == "idle" then return anims.Idle or anims.GroundIdle
     elseif state == "walking" then return anims.Walk
     elseif state == "flying" then return anims.Fly
     elseif state == "flyidle" then return anims.FlyIdle or anims.Fly
@@ -235,11 +342,10 @@ local function getAnimNameForState(anims, state)
     else return nil end
 end
 
--- Switch Animation State
+-- Switch State
 local function switchState(petData, newState)
-    if newState == "takeoff" then
-        local hasTakeoff = petData.Animations and petData.Animations.Takeoff
-        newState = (not hasTakeoff) and "flying" or newState
+    if newState == "takeoff" and not petData.Animations.Takeoff then
+        newState = "flying"
     end
     
     if petData.CurrentState ~= newState then
@@ -254,15 +360,13 @@ local function switchState(petData, newState)
             end
         end
         
-        local animName = getAnimNameForState(petData.Animations, newState)
-        local track = animName and petData.Tracks[animName.Name]
+        local anim = getAnimForState(petData.Animations, newState)
+        local track = anim and petData.Tracks[anim.Name]
         
         if track then
             track.Looped = (newState ~= "landing" and newState ~= "takeoff")
             track:Play(track.Looped and 0.2 or 0.05)
-            print("Playing: " .. newState .. " (" .. animName.Name .. ")")
-        else
-            print("No track for: " .. newState)
+            print("Playing: " .. newState)
         end
     end
 end
@@ -346,10 +450,7 @@ local function spawnVisualPet(petName)
         primary = pet:FindFirstChild("Torso") or pet:FindFirstChild("RootPart") or pet:FindFirstChildWhichIsA("BasePart")
         if primary then
             pet.PrimaryPart = primary
-            print("PrimaryPart: " .. primary.Name)
         end
-    else
-        print("PrimaryPart: " .. primary.Name .. " (existing)")
     end
     
     if not primary then
@@ -360,62 +461,27 @@ local function spawnVisualPet(petName)
     
     -- Compute foot offset
     local footOffset = computeFootOffset(pet)
-    print("Foot offset: " .. footOffset)
     
     -- ============================================
-    -- CRITICAL FIX: Create AnimationController BEFORE parenting
+    -- NEW: Create animations from IDs directly
     -- ============================================
-    local animController = Instance.new("AnimationController")
-    animController.Parent = pet
-    
-    local animator = Instance.new("Animator")
-    animator.Parent = animController
-    
-    print("AnimationController ready")
-    
-    -- Parent to workspace
-    pet.Parent = workspace
-    print("Parented to workspace")
-    
-    -- ============================================
-    -- FIXED: Find ALL animations using GetDescendants
-    -- ============================================
-    print("Searching for animations...")
-    local animations = findAnimations(pet)
-    
-    local tracks = {}
-    
-    -- Load animations with detailed error reporting
-    for name, anim in pairs(animations) do
-        print("Loading: " .. name .. " (" .. anim.AnimationId .. ")")
-        
-        local success, result = pcall(function()
-            return animator:LoadAnimation(anim)
-        end)
-        
-        if success and result then
-            tracks[name] = result
-            print("  SUCCESS: " .. name)
-        else
-            warn("  FAILED: " .. name .. " - " .. tostring(result))
-        end
-    end
+    local animations, tracks, animator = createAnimations(petName, pet)
     
     -- Determine if flyer
     local isFlyer = tracks.Fly ~= nil
     print("Is flyer: " .. tostring(isFlyer))
     
-    -- Determine initial state
+    -- Parent to workspace AFTER animation setup
+    pet.Parent = workspace
+    print("Parented to workspace")
+    
+    -- Play initial animation
     local initialState = isFlyer and "flying" or "idle"
-    local initialAnim = getAnimNameForState(animations, initialState)
+    local initialAnim = getAnimForState(animations, initialState)
     
     if initialAnim and tracks[initialAnim.Name] then
-        tracks[initialAnim.Name].Looped = true
-        tracks[initialAnim.Name].Priority = Enum.AnimationPriority.Movement
         tracks[initialAnim.Name]:Play(0.2)
         print("Playing initial: " .. initialState)
-    else
-        print("No initial animation available")
     end
     
     -- Anchor primary
@@ -432,7 +498,7 @@ local function spawnVisualPet(petName)
         math.sin(angle) * radius
     )
     
-    -- Create slot part
+    -- Create slot
     local slot = Instance.new("Part")
     slot.Name = "PetSlot" .. index
     slot.Size = Vector3.new(1, 1, 1)
@@ -458,7 +524,6 @@ local function spawnVisualPet(petName)
     
     -- Initial position
     pet:PivotTo(slot.CFrame * slotAttach.CFrame)
-    print("Position set")
     
     -- Pet data
     local petData = {
@@ -614,6 +679,6 @@ end)
 
 player.CharacterAdded:Connect(despawnAllPets)
 
-print("GAG 2 Visual Pet Spawner v6 LOADED")
-print("FIXED: GetDescendants() finds ALL animations")
-print("FIXED: Detailed logging for debugging")
+print("GAG 2 Visual Pet Spawner v7 LOADED")
+print("FIXED: Fresh Animation objects with rbxassetid:// IDs")
+print("All game animation IDs included in database")
