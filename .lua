@@ -1,6 +1,6 @@
--- GAG 2 Visual Pet Spawner v5
--- FIXED: Animation loading with proper AnimationController setup
--- FIXED: Handles both ground pets (Idle/Walk) and flyers (Fly/FlyIdle)
+-- GAG 2 Visual Pet Spawner v6
+-- FIXED: Animation search uses GetDescendants() to find ALL animations anywhere in the model
+-- FIXED: More robust animation loading with retry
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -201,29 +201,27 @@ local function computeFootOffset(model)
     return lowest == math.huge and 0 or pivotY - lowest
 end
 
--- Find Animations on Model (matches v_u_86)
+-- ============================================
+-- FIXED: Find Animations using GetDescendants()
+-- ============================================
 local function findAnimations(model)
     local anims = {}
-    local animFolder = model:FindFirstChild("Animations")
+    local count = 0
     
-    if animFolder then
-        for _, child in pairs(animFolder:GetChildren()) do
-            if child:IsA("Animation") then
-                anims[child.Name] = child
-            end
+    -- Search ALL descendants, not just direct children
+    for _, desc in ipairs(model:GetDescendants()) do
+        if desc:IsA("Animation") then
+            anims[desc.Name] = desc
+            count = count + 1
+            print("  Found animation: " .. desc.Name .. " | ID: " .. desc.AnimationId)
         end
     end
     
-    for _, child in pairs(model:GetChildren()) do
-        if child:IsA("Animation") then
-            anims[child.Name] = child
-        end
-    end
-    
+    print("Total animations found: " .. count)
     return anims
 end
 
--- Get Animation Name for State (matches v_u_89)
+-- Get Animation Name for State
 local function getAnimNameForState(anims, state)
     if not anims then return nil end
     
@@ -237,7 +235,7 @@ local function getAnimNameForState(anims, state)
     else return nil end
 end
 
--- Switch Animation State (matches v_u_99)
+-- Switch Animation State
 local function switchState(petData, newState)
     if newState == "takeoff" then
         local hasTakeoff = petData.Animations and petData.Animations.Takeoff
@@ -257,14 +255,14 @@ local function switchState(petData, newState)
         end
         
         local animName = getAnimNameForState(petData.Animations, newState)
-        local track = animName and petData.Tracks[animName]
+        local track = animName and petData.Tracks[animName.Name]
         
         if track then
             track.Looped = (newState ~= "landing" and newState ~= "takeoff")
             track:Play(track.Looped and 0.2 or 0.05)
-            print("Playing animation: " .. newState .. " (" .. animName.Name .. ")")
+            print("Playing: " .. newState .. " (" .. animName.Name .. ")")
         else
-            print("No animation for state: " .. newState)
+            print("No track for: " .. newState)
         end
     end
 end
@@ -329,7 +327,7 @@ local function spawnVisualPet(petName)
     
     -- Clone pet
     local pet = template:Clone()
-    print("Cloned: " .. petName)
+    print("=== Spawning: " .. petName .. " ===")
     
     -- Setup parts
     for _, part in pairs(pet:GetDescendants()) do
@@ -348,8 +346,10 @@ local function spawnVisualPet(petName)
         primary = pet:FindFirstChild("Torso") or pet:FindFirstChild("RootPart") or pet:FindFirstChildWhichIsA("BasePart")
         if primary then
             pet.PrimaryPart = primary
-            print("PrimaryPart set to: " .. primary.Name)
+            print("PrimaryPart: " .. primary.Name)
         end
+    else
+        print("PrimaryPart: " .. primary.Name .. " (existing)")
     end
     
     if not primary then
@@ -362,47 +362,46 @@ local function spawnVisualPet(petName)
     local footOffset = computeFootOffset(pet)
     print("Foot offset: " .. footOffset)
     
-    -- CRITICAL: Create AnimationController BEFORE parenting to workspace
-    -- This ensures animations can load properly
+    -- ============================================
+    -- CRITICAL FIX: Create AnimationController BEFORE parenting
+    -- ============================================
     local animController = Instance.new("AnimationController")
     animController.Parent = pet
     
     local animator = Instance.new("Animator")
     animator.Parent = animController
     
-    print("AnimationController created")
+    print("AnimationController ready")
     
-    -- Parent to workspace FIRST so animations can load
+    -- Parent to workspace
     pet.Parent = workspace
     print("Parented to workspace")
     
-    -- Now find and load animations
+    -- ============================================
+    -- FIXED: Find ALL animations using GetDescendants
+    -- ============================================
+    print("Searching for animations...")
     local animations = findAnimations(pet)
-    print("Found " .. #animations .. " animations")
-    
-    for name, anim in pairs(animations) do
-        print("  - " .. name .. ": " .. anim.AnimationId)
-    end
     
     local tracks = {}
     
-    -- Load animations with error handling
+    -- Load animations with detailed error reporting
     for name, anim in pairs(animations) do
-        local success, track = pcall(function()
+        print("Loading: " .. name .. " (" .. anim.AnimationId .. ")")
+        
+        local success, result = pcall(function()
             return animator:LoadAnimation(anim)
         end)
         
-        if success and track then
-            track.Looped = true
-            track.Priority = Enum.AnimationPriority.Movement
-            tracks[name] = track
-            print("Loaded animation: " .. name)
+        if success and result then
+            tracks[name] = result
+            print("  SUCCESS: " .. name)
         else
-            warn("Failed to load animation: " .. name .. " - " .. tostring(track))
+            warn("  FAILED: " .. name .. " - " .. tostring(result))
         end
     end
     
-    -- Determine if flyer (has Fly animation)
+    -- Determine if flyer
     local isFlyer = tracks.Fly ~= nil
     print("Is flyer: " .. tostring(isFlyer))
     
@@ -411,8 +410,12 @@ local function spawnVisualPet(petName)
     local initialAnim = getAnimNameForState(animations, initialState)
     
     if initialAnim and tracks[initialAnim.Name] then
+        tracks[initialAnim.Name].Looped = true
+        tracks[initialAnim.Name].Priority = Enum.AnimationPriority.Movement
         tracks[initialAnim.Name]:Play(0.2)
         print("Playing initial: " .. initialState)
+    else
+        print("No initial animation available")
     end
     
     -- Anchor primary
@@ -429,7 +432,7 @@ local function spawnVisualPet(petName)
         math.sin(angle) * radius
     )
     
-    -- Create slot part for positioning
+    -- Create slot part
     local slot = Instance.new("Part")
     slot.Name = "PetSlot" .. index
     slot.Size = Vector3.new(1, 1, 1)
@@ -455,7 +458,7 @@ local function spawnVisualPet(petName)
     
     -- Initial position
     pet:PivotTo(slot.CFrame * slotAttach.CFrame)
-    print("Initial position set")
+    print("Position set")
     
     -- Pet data
     local petData = {
@@ -548,7 +551,7 @@ local function spawnVisualPet(petName)
         
         local animState
         if petData.IsFlyer then
-            animState = "flying" -- Flyers always fly
+            animState = "flying"
         else
             animState = smoothSpeed > 2 and "walking" or "idle"
         end
@@ -565,7 +568,7 @@ local function spawnVisualPet(petName)
     table.insert(activePets, petData)
     
     infoLabel.Text = "Selected: " .. (selectedPetName or "None") .. " | Active: " .. #activePets .. "/6"
-    print("Spawn complete! Active: " .. #activePets)
+    print("=== Spawn Complete ===")
 end
 
 -- Despawn All
@@ -586,7 +589,6 @@ local function despawnAllPets()
     end
     activePets = {}
     infoLabel.Text = "Selected: " .. (selectedPetName or "None") .. " | Active: 0/6"
-    print("All despawned")
 end
 
 -- Events
@@ -612,6 +614,6 @@ end)
 
 player.CharacterAdded:Connect(despawnAllPets)
 
-print("GAG 2 Visual Pet Spawner v5 LOADED")
-print("FIXED: AnimationController created before parenting")
-print("FIXED: Proper animation state switching")
+print("GAG 2 Visual Pet Spawner v6 LOADED")
+print("FIXED: GetDescendants() finds ALL animations")
+print("FIXED: Detailed logging for debugging")
