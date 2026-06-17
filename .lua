@@ -1,6 +1,6 @@
 -- ============================================
 -- GAG 2 VISUAL PET SPAWNER - DELTA COMPATIBLE
--- WITH EnsureSlotAttachment FROM UPLOADED FILE
+-- EXACT LOGIC FROM UPLOADED FILE
 -- ============================================
 
 local Players = game:GetService("Players")
@@ -97,10 +97,6 @@ local function ComputeFootOffset(model)
     
     return lowest == math.huge and 0 or pivotY - lowest
 end
-
--- ============================================
--- EnsureSlotAttachment - EXACT FROM FILE (Line 117)
--- ============================================
 
 local function EnsureSlotAttachment(slotPart, footOffset, pivotCF)
     local attachment = slotPart:FindFirstChild("PetTarget")
@@ -248,14 +244,17 @@ local function ApplyVisibility(petData, visible)
 end
 
 -- ============================================
--- SPAWNER LOGIC WITH EnsureSlotAttachment
+-- SPAWNER STATE
 -- ============================================
 
 local SpawnedPets = {}
 local SpawnerFolder = nil
 local SpawnerGUI = nil
-local RenderConnection = nil
 local spawnerFrame = nil
+
+-- ============================================
+-- RAYCAST (exact from file)
+-- ============================================
 
 local RaycastParams_Ground = RaycastParams.new()
 RaycastParams_Ground.FilterType = Enum.RaycastFilterType.Exclude
@@ -275,7 +274,7 @@ local function CastGroundY(position, startY)
 end
 
 -- ============================================
--- BuildVisualPet WITH EnsureSlotAttachment
+-- BuildVisualPet (EXACT BuildSlotModel logic)
 -- ============================================
 
 local function BuildVisualPet(species, position, petType, size)
@@ -285,12 +284,13 @@ local function BuildVisualPet(species, position, petType, size)
         return nil
     end
     
+    -- Attributes (exact from file)
     model:SetAttribute("PetID", "Visual_" .. tostring(os.clock()))
     model:SetAttribute("Owner", LocalPlayer.Name)
     model:SetAttribute("OwnerSlot", "VisualSlot")
     model:SetAttribute("PetVisual", true)
     
-    -- Primary part setup (EXACT from file)
+    -- Primary part (exact from file)
     local primary = model.PrimaryPart
     local fallback = not (primary and primary.Parent) and (
         model:FindFirstChild("Torso") or 
@@ -307,7 +307,7 @@ local function BuildVisualPet(species, position, petType, size)
         return nil
     end
     
-    -- Pivot CFrame (EXACT from file)
+    -- Pivot CFrame (exact from file)
     local pivotCF
     if module then
         local pivot = module.Pivot
@@ -325,7 +325,7 @@ local function BuildVisualPet(species, position, petType, size)
     end
     model:PivotTo(pivotCF)
     
-    -- Scale (EXACT from file)
+    -- Scale (exact from file)
     local scale = PetSizes.GetScale(size or "Normal", {
         Big = module.BigScale,
         Huge = module.HugeScale
@@ -334,12 +334,10 @@ local function BuildVisualPet(species, position, petType, size)
         model:ScaleTo(scale)
     end
     
-    -- Foot offset (EXACT from file)
+    -- Foot offset (exact from file)
     local footOffset = ComputeFootOffset(model)
     
-    -- ============================================
-    -- PetPivot Attachment (EXACT from file line ~147)
-    -- ============================================
+    -- PetPivot attachment (exact from file line ~147)
     local petPivotCF = primary.CFrame:Inverse() * model:GetPivot()
     local petPivot = Instance.new("Attachment")
     petPivot.Name = "PetPivot"
@@ -347,7 +345,7 @@ local function BuildVisualPet(species, position, petType, size)
     petPivot.Parent = primary
     
     -- ============================================
-    -- CREATE VISUAL SLOT PART (mimics PetPart from file)
+    -- CREATE VISUAL SLOT (mimics PetPart from file)
     -- ============================================
     local visualSlot = Instance.new("Part")
     visualSlot.Name = "PetPart1"
@@ -358,6 +356,11 @@ local function BuildVisualPet(species, position, petType, size)
     visualSlot.Anchored = true
     visualSlot.Massless = true
     
+    -- Slot offsets (like real pets have)
+    visualSlot:SetAttribute("SlotOffsetX", 3)
+    visualSlot:SetAttribute("SlotOffsetZ", 3)
+    visualSlot:SetAttribute("SlotHeightOffset", 0)
+    
     -- Position slot at spawn position
     if position then
         visualSlot.CFrame = CFrame.new(position)
@@ -367,9 +370,7 @@ local function BuildVisualPet(species, position, petType, size)
         visualSlot.CFrame = hrp and hrp.CFrame or CFrame.new(0, 10, 0)
     end
     
-    -- ============================================
     -- EnsureSlotAttachment (EXACT from file line 117)
-    -- ============================================
     local slotAttachment = EnsureSlotAttachment(visualSlot, footOffset, pivotCF)
     
     -- Parent slot
@@ -395,7 +396,7 @@ local function BuildVisualPet(species, position, petType, size)
     end
     model.Parent = modelsFolder
     
-    -- Animator setup (EXACT from file)
+    -- Animator (EXACT from file)
     local animator = GetOrCreateAnimator(model)
     local anims = FindAnimationsOnModel(model, module.Animations)
     
@@ -412,11 +413,11 @@ local function BuildVisualPet(species, position, petType, size)
     end
     
     -- ============================================
-    -- Pet data table (MATCHES file's structure EXACTLY)
+    -- Pet data (MATCHES file's structure EXACTLY)
     -- ============================================
     local petData = {
         Owner = LocalPlayer,
-        Slot = visualSlot,           -- NOW HAS SLOT (the visual slot part)
+        Slot = visualSlot,
         Species = species,
         Module = module,
         Model = model,
@@ -424,8 +425,8 @@ local function BuildVisualPet(species, position, petType, size)
         Animator = animator,
         Tracks = tracks,
         CurrentState = "",
-        SlotAttachment = slotAttachment,  -- NOW HAS SlotAttachment from EnsureSlotAttachment
-        PetAttachment = petPivot,          -- NOW HAS PetAttachment
+        SlotAttachment = slotAttachment,
+        PetAttachment = petPivot,
         FootOffset = footOffset,
         SpeciesPivotCFrame = pivotCF,
         Connections = {},
@@ -438,19 +439,28 @@ local function BuildVisualPet(species, position, petType, size)
         SmoothedSpeed = 0,
         LastVisualPos = nil,
         LastVisualTime = nil,
-        -- Slot-specific from file
+        -- Slot interpolation (from file)
         LastSlotCF = nil,
         PrevSlotCF = nil,
         LastSlotTickAt = nil,
         SlotTickPeriod = nil,
+        -- Ground casting (from file)
         SlotGroundCastNext = 0,
         SlotGroundCachedY = nil,
         LastGroundY = nil,
+        -- Local chase (from file's RenderStep)
+        LocalGoalPos = nil,
+        LocalGoalRotation = nil,
+        LocalChase = false,
+        LastTrackedGoalXZ = nil,
+        LastGoalChangeTime = nil,
+        ForceFollowUntil = nil,
+        VirtualSlotPos = nil,
     }
     
     ApplyPetTypeTag(model, petType)
     
-    -- Ancestry changed cleanup
+    -- Cleanup connections
     local conn1 = model.AncestryChanged:Connect(function(_, parent)
         if parent == nil then
             DestroyVisualPet(petData)
@@ -458,7 +468,6 @@ local function BuildVisualPet(species, position, petType, size)
     end)
     table.insert(petData.Connections, conn1)
     
-    -- Slot cleanup too
     local conn2 = visualSlot.AncestryChanged:Connect(function(_, parent)
         if parent == nil then
             DestroyVisualPet(petData)
@@ -466,7 +475,7 @@ local function BuildVisualPet(species, position, petType, size)
     end)
     table.insert(petData.Connections, conn2)
     
-    -- Initial animation state
+    -- Initial animation state (EXACT from file's task.spawn)
     local initialState
     if petData.IsFlyer then
         initialState = "flying"
@@ -479,7 +488,7 @@ local function BuildVisualPet(species, position, petType, size)
     ApplyVisibility(petData, true)
     
     table.insert(SpawnedPets, petData)
-    print("✅ Spawned:", species, "| Slot:", visualSlot.Name, "| Attachment:", slotAttachment.Name)
+    print("✅ Spawned:", species)
     return petData
 end
 
@@ -517,7 +526,7 @@ function DestroyAllVisualPets()
 end
 
 -- ============================================
--- FOLLOW LOGIC WITH SLOT ATTACHMENTS
+-- EXACT PET FOLLOW FROM FILE (RenderStepped)
 -- ============================================
 
 local function UpdatePetFollow(petData, dt)
@@ -534,54 +543,302 @@ local function UpdatePetFollow(petData, dt)
     if not (slot and slot.Parent) then return end
     
     -- ============================================
-    -- Update slot position to follow player (like real pet slots)
+    -- EXACT LOGIC FROM FILE'S RenderStepped
     -- ============================================
-    local hrpCF = hrp.CFrame
-    local lookVector = hrpCF.LookVector
-    local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z)
-    local direction = flatLook.Magnitude < 0.0001 and Vector3.new(0, 0, -1) or flatLook.Unit
     
-    local hrpPos = hrpCF.Position
-    local followCF = CFrame.lookAt(hrpPos, hrpPos + direction) * CFrame.new(3, -2.5, 3)
+    local v288 = nil
+    local v289 = slot:GetAttribute("SlotOverride")
+    local v290 = slot:GetAttribute("SlotOffsetX")
+    local v291 = slot:GetAttribute("SlotOffsetZ")
+    local v292 = slot:GetAttribute("SlotHeightOffset") or 0
+    local v293 = slot:GetAttribute("PetClaim")
+    local v294
+    if type(v293) == "string" then
+        v294 = v293 ~= ""
+    else
+        v294 = false
+    end
     
-    -- Update slot CFrame (mimics server updating PetPart)
-    slot.CFrame = followCF
+    if v294 then
+        petData.ForceFollowUntil = nil
+        v289 = true
+    elseif petData.ForceFollowUntil and os.clock() < petData.ForceFollowUntil then
+        if petData.Owner == LocalPlayer and hrp then
+            v289 = false
+        else
+            petData.ForceFollowUntil = nil
+        end
+    elseif petData.ForceFollowUntil then
+        petData.ForceFollowUntil = nil
+    end
     
     -- ============================================
-    -- Slot interpolation (EXACT from file's RenderStep)
+    -- LOCAL CHASE (when owner is local player)
+    -- EXACT from file lines 295-311
     -- ============================================
-    local slotCF = slot.CFrame
-    if slotCF ~= petData.LastSlotCF then
-        local now = os.clock()
-        if petData.LastSlotTickAt then
-            local tickDelta = now - petData.LastSlotTickAt
-            if petData.SlotTickPeriod then
-                petData.SlotTickPeriod = petData.SlotTickPeriod * 0.7 + math.clamp(tickDelta, 0.01, 0.2) * 0.3
-            else
-                petData.SlotTickPeriod = math.clamp(tickDelta, 0.01, 0.2)
+    if petData.Owner == LocalPlayer and (hrp and (v289 ~= true and (typeof(v290) == "number" and typeof(v291) == "number"))) then
+        local v295 = hrp.CFrame
+        local v296 = v295.LookVector
+        local v297 = v296.X
+        local v298 = v296.Z
+        local v299 = Vector3.new(v297, 0, v298)
+        local v300 = v299.Magnitude < 0.0001 and Vector3.new(0, 0, -1) or v299.Unit
+        local v301 = v295.Position
+        local v302 = CFrame.lookAt(v301, v301 + v300) * CFrame.new(v290, -2.5, v291)
+        local v303 = v302.Position
+        local v304
+        if petData.IsFlyer then
+            v304 = v303.Y + v292
+        else
+            v304 = v303.Y
+        end
+        local v305 = v303.X
+        local v306 = v303.Z
+        local v307 = Vector3.new(v305, v304, v306)
+        local v308 = v302 - v302.Position
+        petData.LocalGoalPos = v307
+        petData.LocalGoalRotation = v308
+        petData.LocalChase = true
+        
+        local v309 = v307.X
+        local v310 = v307.Z
+        local v311 = Vector3.new(v309, 0, v310)
+        if petData.LastTrackedGoalXZ and (v311 - petData.LastTrackedGoalXZ).Magnitude > 0.005 then
+            petData.LastGoalChangeTime = os.clock()
+        end
+        petData.LastTrackedGoalXZ = v311
+    else
+        -- ============================================
+        -- SLOT INTERPOLATION (exact from file)
+        -- ============================================
+        local v312 = slot.CFrame
+        if v312 ~= petData.LastSlotCF then
+            local v313 = os.clock()
+            if petData.LastSlotTickAt then
+                local v314 = v313 - petData.LastSlotTickAt
+                if petData.SlotTickPeriod then
+                    petData.SlotTickPeriod = petData.SlotTickPeriod * 0.7 + math.clamp(v314, 0.01, 0.2) * 0.3
+                else
+                    petData.SlotTickPeriod = math.clamp(v314, 0.01, 0.2)
+                end
+            end
+            petData.PrevSlotCF = petData.LastSlotCF or v312
+            petData.LastSlotCF = v312
+            petData.LastSlotTickAt = v313
+            petData.LastGoalChangeTime = v313
+        end
+        
+        if petData.PrevSlotCF and petData.LastSlotTickAt then
+            local v315 = petData.SlotTickPeriod or 0.03333333333333333
+            local v316 = (os.clock() - petData.LastSlotTickAt) / v315
+            local v317 = math.clamp(v316, 0, 1)
+            v312 = petData.PrevSlotCF:Lerp(v312, v317)
+        end
+        
+        v288 = v312 * petData.SlotAttachment.CFrame
+        petData.InterpSlotCF = v312
+        petData.LocalChase = false
+    end
+    
+    -- ============================================
+    -- LOCAL CHASE MOVEMENT (exact from file)
+    -- ============================================
+    if petData.LocalChase then
+        local v318 = petData.LocalGoalPos
+        local v319 = petData.LocalGoalRotation
+        local v320 = primary.CFrame.Position
+        local v321 = v318.X - v320.X
+        local v322 = v318.Z - v320.Z
+        local v323 = v321 * v321 + v322 * v322
+        local v324 = math.sqrt(v323)
+        local v325 = -60 * dt
+        local v326 = 1 - math.exp(v325)
+        local v327 = petData.Module and (petData.Module.FollowSpeed or 14) or 14
+        
+        local v328 = petData.Owner
+        if v328 then
+            local v329 = v328.Character
+            if v329 then
+                v329 = v329:FindFirstChildOfClass("Humanoid")
+            end
+            if v329 then
+                local v330 = v329.WalkSpeed / 16
+                v327 = v327 * math.max(1, v330)
             end
         end
-        petData.PrevSlotCF = petData.LastSlotCF or slotCF
-        petData.LastSlotCF = slotCF
-        petData.LastSlotTickAt = now
+        
+        local v331 = v327 * dt
+        local v332, v333
+        
+        if v324 <= 0.05 or v324 <= v331 then
+            v332 = v318.X
+            v333 = v318.Z
+        else
+            local v334 = 1 / v324
+            local v335 = v331 / math.max(v326, 0.001)
+            v332 = v320.X + v321 * v334 * v335
+            v333 = v320.Z + v322 * v334 * v335
+        end
+        
+        local v336
+        if petData.IsFlyer then
+            local v337 = (slot:GetAttribute("SlotHeightOffset") or 0) / 1.5
+            local v338 = math.clamp(v337, 0, 1)
+            local v339 = v318.Y
+            local v340
+            if v338 < 1 then
+                local v341 = v320.Y
+                local v342 = CastGroundY(Vector3.new(v332, v341, v333), v320.Y) or (petData.LastChaseGroundY or v320.Y)
+                local v343 = petData.LastChaseGroundY or v342
+                local v344 = 18 * dt
+                local v345 = math.clamp(v344, 0, 1)
+                local v346 = v343 + (v342 - v343) * v345
+                petData.LastChaseGroundY = v346
+                v340 = v346 + (petData.FootOffset or 0)
+            else
+                v340 = v339
+            end
+            v336 = v340 * (1 - v338) + v339 * v338
+        else
+            local v347 = v320.Y
+            local v348 = CastGroundY(Vector3.new(v332, v347, v333), v320.Y) or (petData.LastChaseGroundY or v320.Y)
+            local v349 = petData.LastChaseGroundY or v348
+            local v350 = 18 * dt
+            local v351 = math.clamp(v350, 0, 1)
+            local v352 = v349 + (v348 - v349) * v351
+            petData.LastChaseGroundY = v352
+            v336 = v352 + (petData.FootOffset or 0)
+        end
+        
+        local v353 = Vector3.new(v332, v336, v333)
+        local v354 = v353 - v320
+        local v355 = v354.Magnitude / math.max(dt, 0.001)
+        local v356 = -v319.LookVector.X
+        local v357 = -v319.LookVector.Z
+        local v358 = math.atan2(v356, v357)
+        
+        if v355 > 0.5 then
+            local v359 = v354.X
+            local v360 = v354.Z
+            local v361 = Vector3.new(v359, 0, v360)
+            if v361.Magnitude > 0.0001 then
+                local v362 = v361.Unit
+                local v363 = -v362.X
+                local v364 = -v362.Z
+                v358 = math.atan2(v363, v364)
+            end
+        end
+        
+        local v365 = petData.LastYaw or v358
+        local v366 = (v358 - v365 + math.pi) % (2 * math.pi) - math.pi
+        local v367 = 12 * dt
+        local v368 = v365 + v366 * math.clamp(v367, 0, 1)
+        petData.LastYaw = v368
+        petData.VirtualSlotPos = nil
+        
+        local v369 = petData.SpeciesPivotCFrame or CFrame.identity
+        local v370 = CFrame.new(v353) * CFrame.Angles(0, v368, 0) * v369
+        primary.CFrame = primary.CFrame:Lerp(v370, v326)
+        
+    else
+        -- ============================================
+        -- SLOT FOLLOW (exact from file)
+        -- ============================================
+        local v371 = primary.CFrame.Position
+        local v372 = v288.Position
+        local v373 = v372.X - v371.X
+        local v374 = v372.Z - v371.Z
+        local v375 = v373 * v373 + v374 * v374
+        local v376 = math.sqrt(v375)
+        local v377 = -60 * dt
+        local v378 = 1 - math.exp(v377)
+        local v379 = petData.Module and (petData.Module.FollowSpeed or 14) or 14
+        
+        local v380 = petData.Owner
+        if v380 then
+            local v381 = v380.Character
+            if v381 then
+                v381 = v381:FindFirstChildOfClass("Humanoid")
+            end
+            if v381 then
+                local v382 = v381.WalkSpeed / 16
+                v379 = v379 * math.max(1, v382)
+            end
+        end
+        
+        local v383 = v379 * dt
+        local v384, v385, v386
+        
+        if v376 > 0.05 and v383 < v376 then
+            local v387 = 1 / v376
+            local v388 = v383 / math.max(v378, 0.001)
+            v384 = v371.X + v373 * v387 * v388
+            v385 = v371.Z + v374 * v387 * v388
+            v386 = true
+        else
+            v384 = v372.X
+            v385 = v372.Z
+            v386 = false
+        end
+        
+        local v389
+        if petData.IsFlyer then
+            v389 = v372.Y
+        else
+            local v390 = v371.Y
+            local v391 = CastGroundY(Vector3.new(v384, v390, v385), v371.Y) or (petData.LastChaseGroundY or v371.Y)
+            local v392 = petData.LastChaseGroundY or v391
+            local v393 = 18 * dt
+            local v394 = math.clamp(v393, 0, 1)
+            local v395 = v392 + (v391 - v392) * v394
+            petData.LastChaseGroundY = v395
+            v389 = v395 + (petData.FootOffset or 0)
+        end
+        
+        local v396 = Vector3.new(v384, v389, v385)
+        local v397 = (petData.InterpSlotCF or v288).LookVector
+        local v398 = -v397.X
+        local v399 = -v397.Z
+        local v400 = math.atan2(v398, v399)
+        local v401 = v396 - v371
+        
+        if v386 and v401.Magnitude / math.max(dt, 0.001) > 0.5 then
+            local v402 = v401.X
+            local v403 = v401.Z
+            local v404 = Vector3.new(v402, 0, v403)
+            if v404.Magnitude > 0.0001 then
+                local v405 = v404.Unit
+                local v406 = -v405.X
+                local v407 = -v405.Z
+                v400 = math.atan2(v406, v407)
+            end
+        end
+        
+        local v408 = petData.LastYaw or v400
+        local v409 = (v400 - v408 + math.pi) % (2 * math.pi) - math.pi
+        local v410 = 12 * dt
+        local v411 = v408 + v409 * math.clamp(v410, 0, 1)
+        petData.LastYaw = v411
+        
+        local v412 = petData.SpeciesPivotCFrame or CFrame.identity
+        local v413 = CFrame.new(v396) * CFrame.Angles(0, v411, 0) * v412
+        primary.CFrame = primary.CFrame:Lerp(v413, v378)
+        petData.VirtualSlotPos = nil
     end
+end
+
+-- ============================================
+-- EXACT ANIMATION STATE FROM FILE (Heartbeat)
+-- ============================================
+
+local function UpdatePetAnimation(petData, dt)
+    local slot = petData.Slot
+    if not (slot and slot.Parent) then return end
     
-    if petData.PrevSlotCF and petData.LastSlotTickAt then
-        local period = petData.SlotTickPeriod or 0.03333333333333333
-        local progress = (os.clock() - petData.LastSlotTickAt) / period
-        local clamped = math.clamp(progress, 0, 1)
-        slotCF = petData.PrevSlotCF:Lerp(slotCF, clamped)
-    end
+    local primary = petData.Primary
+    if not (primary and primary.Parent) then return end
     
-    -- ============================================
-    -- Position model at slot * attachment (EXACT from file)
-    -- ============================================
-    local targetCF = slotCF * petData.SlotAttachment.CFrame
-    primary.CFrame = targetCF
-    
-    -- ============================================
-    -- Ground Y for slot attachment (EXACT from file's Heartbeat)
-    -- ============================================
+    -- Slot attachment ground update (exact from file)
     local slotPos = slot.Position
     local now = os.clock()
     
@@ -593,61 +850,54 @@ local function UpdatePetFollow(petData, dt)
         petData.SlotGroundCastNext = now + 0.06666666666666667
     end
     
-    local cachedY = petData.SlotGroundCachedY
-    if cachedY == nil then
-        cachedY = petData.LastGroundY or slotPos.Y
+    local v437 = petData.SlotGroundCachedY
+    if v437 == nil then
+        v437 = petData.LastGroundY or slotPos.Y
     end
+    local v438 = petData.LastGroundY or v437
+    local v439 = 18 * dt
+    local v440 = math.clamp(v439, 0, 1)
+    local v441 = v438 + (v437 - v438) * v440
+    petData.LastGroundY = v441
     
-    local lastGroundY = petData.LastGroundY or cachedY
-    local lerpFactor = math.clamp(18 * dt, 0, 1)
-    local newGroundY = lastGroundY + (cachedY - lastGroundY) * lerpFactor
-    petData.LastGroundY = newGroundY
-    
-    local attachmentY = newGroundY - slotPos.Y + petData.FootOffset
-    petData.SlotAttachment.CFrame = CFrame.new(0, attachmentY, 0) * petData.SpeciesPivotCFrame
+    local v421 = v441 - slotPos.Y + (petData.FootOffset or 0)
+    petData.SlotAttachment.CFrame = CFrame.new(0, v421, 0) * petData.SpeciesPivotCFrame
     
     -- ============================================
     -- Animation state (EXACT from file's Heartbeat)
     -- ============================================
-    local speedCalc = 0
-    if petData.LastVisualPos and petData.LastVisualTime then
-        local timeDelta = math.max(0.001, now - petData.LastVisualTime)
-        local moved = (primary.Position - petData.LastVisualPos).Magnitude
-        if moved < 50 then
-            speedCalc = moved / timeDelta
+    local v455 = os.clock()
+    local v456 = 0
+    
+    if primary then
+        local v457 = primary.Position
+        if v457 then
+            if petData.LastVisualPos and petData.LastVisualTime then
+                local v458 = v455 - petData.LastVisualTime
+                local v459 = math.max(0.001, v458)
+                local v460 = (v457 - petData.LastVisualPos).Magnitude
+                if v460 < 50 then
+                    v456 = v460 / v459
+                end
+            end
+            petData.LastVisualPos = v457
+            petData.LastVisualTime = v455
         end
     end
-    petData.LastVisualPos = primary.Position
-    petData.LastVisualTime = now
     
-    local speedLerp = dt * 6
-    petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - math.clamp(speedLerp, 0, 1)) 
-        + speedCalc * math.clamp(speedLerp, 0, 1)
+    local v461 = dt * 6
+    local v462 = math.clamp(v461, 0, 1)
+    petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - v462) + v456 * v462
     
-    local smoothed = petData.SmoothedSpeed
-    local currentAnim = petData.AnimState or "idle"
-    
-    if petData.IsFlyer then
-        local flightPhase = "Flying"
-        local animState = flightPhase == "Flying" and "flying" or "flyidle"
-        local moduleAnims = petData.Module and petData.Module.Animations
-        
-        if animState == "flying" and (moduleAnims and moduleAnims.FlyIdle) then
-            animState = smoothed > 2 and "flying" or (smoothed < 0.6 and "flyidle" 
-                or (currentAnim ~= "flying" and currentAnim ~= "flyidle" and "flying" or currentAnim))
-        end
-        petData.AnimState = animState
-        SwitchState(petData, animState)
-    else
-        local newAnim = currentAnim == "idle" and smoothed > 2 and "walking" 
-            or (currentAnim == "walking" and smoothed < 0.6 and "idle" or currentAnim)
-        petData.AnimState = newAnim
-        SwitchState(petData, newAnim)
-    end
+    local v463 = petData.SmoothedSpeed
+    local v464 = petData.AnimState or "idle"
+    local v465 = v464 == "idle" and v463 > 2 and "walking" or (v464 == "walking" and v463 < 0.6 and "idle" or v464)
+    petData.AnimState = v465
+    SwitchState(petData, v465)
 end
 
 -- ============================================
--- DELTA-COMPATIBLE GUI
+-- DELTA GUI WITH DELETE PER PET
 -- ============================================
 
 local function CreateSpawnerGUI()
@@ -656,7 +906,6 @@ local function CreateSpawnerGUI()
     end
     
     local guiParent = PlayerGui
-    
     if not guiParent then
         local success, hui = pcall(function()
             return gethui and gethui() or game:GetService("CoreGui")
@@ -673,14 +922,13 @@ local function CreateSpawnerGUI()
     screenGui.Parent = guiParent
     
     if not screenGui.Parent then
-        warn("Failed to parent ScreenGui! Trying alternate method...")
         screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
     
     local frame = Instance.new("Frame")
     frame.Name = "MainFrame"
-    frame.Size = UDim2.new(0, 320, 0, 450)
-    frame.Position = UDim2.new(0.5, -160, 0.5, -225)
+    frame.Size = UDim2.new(0, 340, 0, 480)
+    frame.Position = UDim2.new(0.5, -170, 0.5, -240)
     frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     frame.BorderSizePixel = 0
     frame.Visible = true
@@ -702,39 +950,104 @@ local function CreateSpawnerGUI()
     
     Instance.new("UICorner", title).CornerRadius = UDim.new(0, 10)
     
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Name = "PetList"
-    scroll.Size = UDim2.new(1, -10, 1, -100)
-    scroll.Position = UDim2.new(0, 5, 0, 50)
-    scroll.BackgroundTransparency = 1
-    scroll.ScrollBarThickness = 6
-    scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scroll.Parent = frame
+    -- Tab buttons
+    local tabFrame = Instance.new("Frame")
+    tabFrame.Size = UDim2.new(1, -10, 0, 30)
+    tabFrame.Position = UDim2.new(0, 5, 0, 47)
+    tabFrame.BackgroundTransparency = 1
+    tabFrame.Parent = frame
     
-    Instance.new("UIListLayout", scroll).Padding = UDim.new(0, 4)
+    local spawnTab = Instance.new("TextButton")
+    spawnTab.Size = UDim2.new(0.48, 0, 1, 0)
+    spawnTab.Text = "Spawn"
+    spawnTab.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+    spawnTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+    spawnTab.Font = Enum.Font.GothamBold
+    spawnTab.TextSize = 14
+    spawnTab.Parent = tabFrame
     
+    Instance.new("UICorner", spawnTab).CornerRadius = UDim.new(0, 6)
+    
+    local manageTab = Instance.new("TextButton")
+    manageTab.Size = UDim2.new(0.48, 0, 1, 0)
+    manageTab.Position = UDim2.new(0.52, 0, 0, 0)
+    manageTab.Text = "Manage (" .. #SpawnedPets .. ")"
+    manageTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    manageTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+    manageTab.Font = Enum.Font.GothamBold
+    manageTab.TextSize = 14
+    manageTab.Parent = tabFrame
+    
+    Instance.new("UICorner", manageTab).CornerRadius = UDim.new(0, 6)
+    
+    -- Content frames
+    local spawnFrame = Instance.new("Frame")
+    spawnFrame.Size = UDim2.new(1, -10, 1, -130)
+    spawnFrame.Position = UDim2.new(0, 5, 0, 80)
+    spawnFrame.BackgroundTransparency = 1
+    spawnFrame.Visible = true
+    spawnFrame.Parent = frame
+    
+    local manageFrame = Instance.new("Frame")
+    manageFrame.Size = UDim2.new(1, -10, 1, -130)
+    manageFrame.Position = UDim2.new(0, 5, 0, 80)
+    manageFrame.BackgroundTransparency = 1
+    manageFrame.Visible = false
+    manageFrame.Parent = frame
+    
+    -- Tab switching
+    spawnTab.MouseButton1Click:Connect(function()
+        spawnFrame.Visible = true
+        manageFrame.Visible = false
+        spawnTab.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+        manageTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end)
+    
+    manageTab.MouseButton1Click:Connect(function()
+        spawnFrame.Visible = false
+        manageFrame.Visible = true
+        spawnTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        manageTab.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+        -- Refresh list
+        refreshManageList()
+    end)
+    
+    -- ============================================
+    -- SPAWN TAB
+    -- ============================================
+    
+    local spawnScroll = Instance.new("ScrollingFrame")
+    spawnScroll.Size = UDim2.new(1, 0, 1, 0)
+    spawnScroll.BackgroundTransparency = 1
+    spawnScroll.ScrollBarThickness = 6
+    spawnScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    spawnScroll.Parent = spawnFrame
+    
+    Instance.new("UIListLayout", spawnScroll).Padding = UDim.new(0, 4)
+    
+    -- Type selector
     local typeFrame = Instance.new("Frame")
-    typeFrame.Size = UDim2.new(1, -10, 0, 30)
+    typeFrame.Size = UDim2.new(1, 0, 0, 28)
     typeFrame.BackgroundTransparency = 1
-    typeFrame.Parent = scroll
+    typeFrame.Parent = spawnScroll
     
     local typeLabel = Instance.new("TextLabel")
-    typeLabel.Size = UDim2.new(0.4, 0, 1, 0)
-    typeLabel.Text = "Pet Type:"
+    typeLabel.Size = UDim2.new(0.35, 0, 1, 0)
+    typeLabel.Text = "Type:"
     typeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     typeLabel.BackgroundTransparency = 1
     typeLabel.Font = Enum.Font.Gotham
-    typeLabel.TextSize = 14
+    typeLabel.TextSize = 13
     typeLabel.Parent = typeFrame
     
     local typeDropdown = Instance.new("TextButton")
-    typeDropdown.Size = UDim2.new(0.55, 0, 1, 0)
-    typeDropdown.Position = UDim2.new(0.45, 0, 0, 0)
+    typeDropdown.Size = UDim2.new(0.6, 0, 1, 0)
+    typeDropdown.Position = UDim2.new(0.4, 0, 0, 0)
     typeDropdown.Text = "Normal"
     typeDropdown.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     typeDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
     typeDropdown.Font = Enum.Font.GothamBold
-    typeDropdown.TextSize = 14
+    typeDropdown.TextSize = 13
     typeDropdown.Parent = typeFrame
     
     Instance.new("UICorner", typeDropdown).CornerRadius = UDim.new(0, 6)
@@ -749,28 +1062,29 @@ local function CreateSpawnerGUI()
         typeDropdown.Text = selectedType
     end)
     
+    -- Size selector
     local sizeFrame = Instance.new("Frame")
-    sizeFrame.Size = UDim2.new(1, -10, 0, 30)
+    sizeFrame.Size = UDim2.new(1, 0, 0, 28)
     sizeFrame.BackgroundTransparency = 1
-    sizeFrame.Parent = scroll
+    sizeFrame.Parent = spawnScroll
     
     local sizeLabel = Instance.new("TextLabel")
-    sizeLabel.Size = UDim2.new(0.4, 0, 1, 0)
+    sizeLabel.Size = UDim2.new(0.35, 0, 1, 0)
     sizeLabel.Text = "Size:"
     sizeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     sizeLabel.BackgroundTransparency = 1
     sizeLabel.Font = Enum.Font.Gotham
-    sizeLabel.TextSize = 14
+    sizeLabel.TextSize = 13
     sizeLabel.Parent = sizeFrame
     
     local sizeDropdown = Instance.new("TextButton")
-    sizeDropdown.Size = UDim2.new(0.55, 0, 1, 0)
-    sizeDropdown.Position = UDim2.new(0.45, 0, 0, 0)
+    sizeDropdown.Size = UDim2.new(0.6, 0, 1, 0)
+    sizeDropdown.Position = UDim2.new(0.4, 0, 0, 0)
     sizeDropdown.Text = "Normal"
     sizeDropdown.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
     sizeDropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
     sizeDropdown.Font = Enum.Font.GothamBold
-    sizeDropdown.TextSize = 14
+    sizeDropdown.TextSize = 13
     sizeDropdown.Parent = sizeFrame
     
     Instance.new("UICorner", sizeDropdown).CornerRadius = UDim.new(0, 6)
@@ -785,23 +1099,25 @@ local function CreateSpawnerGUI()
         sizeDropdown.Text = selectedSize
     end)
     
+    -- Separator
     local sep = Instance.new("Frame")
-    sep.Size = UDim2.new(1, -10, 0, 2)
+    sep.Size = UDim2.new(1, 0, 0, 2)
     sep.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     sep.BorderSizePixel = 0
-    sep.Parent = scroll
+    sep.Parent = spawnScroll
     
+    -- Pet spawn buttons
     for species, module in pairs(PetModules) do
         local btn = Instance.new("TextButton")
         btn.Name = species .. "Btn"
-        btn.Size = UDim2.new(1, -10, 0, 32)
-        btn.Text = "  " .. species
+        btn.Size = UDim2.new(1, -5, 0, 30)
+        btn.Text = "  📌 " .. species
         btn.TextXAlignment = Enum.TextXAlignment.Left
         btn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
         btn.Font = Enum.Font.Gotham
-        btn.TextSize = 14
-        btn.Parent = scroll
+        btn.TextSize = 13
+        btn.Parent = spawnScroll
         
         Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
         
@@ -813,18 +1129,96 @@ local function CreateSpawnerGUI()
             local petTypeVal = selectedType == "Rainbow" and PetTypes.Rainbow or nil
             
             BuildVisualPet(species, pos, petTypeVal, selectedSize)
+            manageTab.Text = "Manage (" .. #SpawnedPets .. ")"
         end)
     end
     
+    -- ============================================
+    -- MANAGE TAB (Delete individual pets)
+    -- ============================================
+    
+    local manageScroll = Instance.new("ScrollingFrame")
+    manageScroll.Name = "ManageScroll"
+    manageScroll.Size = UDim2.new(1, 0, 1, 0)
+    manageScroll.BackgroundTransparency = 1
+    manageScroll.ScrollBarThickness = 6
+    manageScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    manageScroll.Parent = manageFrame
+    
+    Instance.new("UIListLayout", manageScroll).Padding = UDim.new(0, 4)
+    
+    local function refreshManageList()
+        -- Clear old
+        for _, child in pairs(manageScroll:GetChildren()) do
+            if child:IsA("TextButton") or child:IsA("Frame") then
+                child:Destroy()
+            end
+        end
+        
+        if #SpawnedPets == 0 then
+            local empty = Instance.new("TextLabel")
+            empty.Size = UDim2.new(1, 0, 0, 40)
+            empty.Text = "No pets spawned"
+            empty.TextColor3 = Color3.fromRGB(150, 150, 150)
+            empty.BackgroundTransparency = 1
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 14
+            empty.Parent = manageScroll
+            return
+        end
+        
+        for i, petData in ipairs(SpawnedPets) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, -5, 0, 32)
+            row.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            row.Parent = manageScroll
+            
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+            
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
+            nameLabel.Position = UDim2.new(0.02, 0, 0, 0)
+            nameLabel.Text = petData.Species
+            nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.Font = Enum.Font.Gotham
+            nameLabel.TextSize = 13
+            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.Parent = row
+            
+            local delBtn = Instance.new("TextButton")
+            delBtn.Size = UDim2.new(0.35, 0, 0.8, 0)
+            delBtn.Position = UDim2.new(0.63, 0, 0.1, 0)
+            delBtn.Text = "❌ Delete"
+            delBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+            delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            delBtn.Font = Enum.Font.GothamBold
+            delBtn.TextSize = 12
+            delBtn.Parent = row
+            
+            Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 4)
+            
+            delBtn.MouseButton1Click:Connect(function()
+                DestroyVisualPet(petData)
+                manageTab.Text = "Manage (" .. #SpawnedPets .. ")"
+                refreshManageList()
+            end)
+        end
+    end
+    
+    -- ============================================
+    -- CLOSE & DELETE ALL
+    -- ============================================
+    
     local closeBtn = Instance.new("TextButton")
     closeBtn.Name = "CloseBtn"
-    closeBtn.Size = UDim2.new(0.4, 0, 0, 35)
-    closeBtn.Position = UDim2.new(0.3, 0, 1, -42)
+    closeBtn.Size = UDim2.new(0.28, 0, 0, 30)
+    closeBtn.Position = UDim2.new(0.02, 0, 1, -36)
     closeBtn.Text = "Close"
-    closeBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 16
+    closeBtn.TextSize = 14
     closeBtn.Parent = frame
     
     Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
@@ -833,11 +1227,29 @@ local function CreateSpawnerGUI()
         frame.Visible = false
     end)
     
+    local deleteAllBtn = Instance.new("TextButton")
+    deleteAllBtn.Size = UDim2.new(0.38, 0, 0, 30)
+    deleteAllBtn.Position = UDim2.new(0.32, 0, 1, -36)
+    deleteAllBtn.Text = "Delete All"
+    deleteAllBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+    deleteAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    deleteAllBtn.Font = Enum.Font.GothamBold
+    deleteAllBtn.TextSize = 14
+    deleteAllBtn.Parent = frame
+    
+    Instance.new("UICorner", deleteAllBtn).CornerRadius = UDim.new(0, 6)
+    
+    deleteAllBtn.MouseButton1Click:Connect(function()
+        DestroyAllVisualPets()
+        manageTab.Text = "Manage (0)"
+        refreshManageList()
+    end)
+    
     local countLabel = Instance.new("TextLabel")
     countLabel.Name = "CountLabel"
-    countLabel.Size = UDim2.new(1, 0, 0, 20)
-    countLabel.Position = UDim2.new(0, 0, 1, -62)
-    countLabel.Text = "Spawned: 0"
+    countLabel.Size = UDim2.new(0.28, 0, 0, 30)
+    countLabel.Position = UDim2.new(0.72, 0, 1, -36)
+    countLabel.Text = "0 pets"
     countLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
     countLabel.BackgroundTransparency = 1
     countLabel.Font = Enum.Font.Gotham
@@ -846,12 +1258,11 @@ local function CreateSpawnerGUI()
     
     task.spawn(function()
         while screenGui and screenGui.Parent do
-            countLabel.Text = "Spawned: " .. #SpawnedPets
+            countLabel.Text = #SpawnedPets .. " pets"
+            manageTab.Text = "Manage (" .. #SpawnedPets .. ")"
             task.wait(0.5)
         end
     end)
-    
-    print("✅ GUI Created! It should be visible on screen.")
     
     SpawnerGUI = screenGui
     return frame
@@ -876,10 +1287,10 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 -- ============================================
--- RENDER (uses slot attachment system now)
+-- RENDER & HEARTBEAT (EXACT from file)
 -- ============================================
 
-RenderConnection = RunService:BindToRenderStep("VisualPetFollow", Enum.RenderPriority.Camera.Value + 1, function(dt)
+RunService:BindToRenderStep("VisualPetFollow", Enum.RenderPriority.Camera.Value + 1, function(dt)
     local filterList = {}
     for _, player in pairs(Players:GetPlayers()) do
         local char = player.Character
@@ -899,6 +1310,14 @@ RenderConnection = RunService:BindToRenderStep("VisualPetFollow", Enum.RenderPri
     end
 end)
 
+RunService.Heartbeat:Connect(function(dt)
+    for _, petData in ipairs(SpawnedPets) do
+        if petData.Slot and petData.Slot.Parent then
+            UpdatePetAnimation(petData, dt)
+        end
+    end
+end)
+
 -- ============================================
 -- AUTO-OPEN
 -- ============================================
@@ -914,5 +1333,6 @@ task.spawn(function()
     end
 end)
 
-print("✅ GAG 2 Visual Pet Spawner loaded with EnsureSlotAttachment!")
-print("GUI should auto-open. Press P to toggle. Delete to clear.")
+print("✅ GAG 2 Visual Pet Spawner loaded!")
+print("Press P for GUI | Spawn tab to spawn | Manage tab to delete individual pets")
+print("Press Delete to remove all pets")
