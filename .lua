@@ -1,12 +1,13 @@
 -- ============================================
--- GAG 2 VISUAL PET SPAWNER - DELTA COMPATIBLE
--- EXACT LOGIC FROM UPLOADED FILE
+-- GAG 2 VISUAL PET SPAWNER
+-- EVERY FEATURE FROM UPLOADED FILE
 -- ============================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
@@ -15,6 +16,7 @@ if not PlayerGui then
     PlayerGui = LocalPlayer.PlayerGui
 end
 
+-- Exact same requires from the file
 local PetModules = require(ReplicatedStorage.SharedModules.PetModules)
 local PetSizes = require(ReplicatedStorage.SharedData.PetSizes)
 local PetTypes = require(ReplicatedStorage.SharedData.PetTypes)
@@ -23,6 +25,7 @@ local PetTypes = require(ReplicatedStorage.SharedData.PetTypes)
 -- EXACT FUNCTIONS FROM UPLOADED FILE
 -- ============================================
 
+-- From file: ApplyPetTypeTag (exact copy, line 12-24)
 local function ApplyPetTypeTag(model, petType)
     if model then
         if petType == PetTypes.Rainbow then
@@ -36,6 +39,7 @@ local function ApplyPetTypeTag(model, petType)
     end
 end
 
+-- From file: CloneSpeciesModel (exact copy, line 111-129)
 local function CloneSpeciesModel(species)
     local module = PetModules[species]
     if not module then
@@ -64,6 +68,7 @@ local function CloneSpeciesModel(species)
     return clone, module
 end
 
+-- From file: ComputeFootOffset (exact copy, line 72-95)
 local function ComputeFootOffset(model)
     local pivotY = model:GetPivot().Position.Y
     local lowest = math.huge
@@ -98,6 +103,7 @@ local function ComputeFootOffset(model)
     return lowest == math.huge and 0 or pivotY - lowest
 end
 
+-- From file: EnsureSlotAttachment (exact copy, line 117)
 local function EnsureSlotAttachment(slotPart, footOffset, pivotCF)
     local attachment = slotPart:FindFirstChild("PetTarget")
     if not attachment then
@@ -110,6 +116,7 @@ local function EnsureSlotAttachment(slotPart, footOffset, pivotCF)
     return attachment
 end
 
+-- From file: GetOrCreateAnimator (exact copy, line 76-86)
 local function GetOrCreateAnimator(model)
     local animController = model:FindFirstChildOfClass("AnimationController")
     if not animController then
@@ -126,6 +133,7 @@ local function GetOrCreateAnimator(model)
     return animator
 end
 
+-- From file: FindAnimationsOnModel (exact copy, line 86-111)
 local function FindAnimationsOnModel(model, animList)
     local found = {}
     local animFolder = model:FindFirstChild("Animations")
@@ -159,6 +167,7 @@ local function FindAnimationsOnModel(model, animList)
     end
 end
 
+-- From file: GetAnimNameForState (exact copy, line 89-108)
 local function GetAnimNameForState(module, state)
     if module then
         module = module.Animations
@@ -186,6 +195,7 @@ local function GetAnimNameForState(module, state)
     end
 end
 
+-- From file: SwitchState (exact copy, line 99-122)
 local function SwitchState(petData, newState)
     if newState == "takeoff" then
         local anims = petData.Module
@@ -230,6 +240,7 @@ local function SwitchState(petData, newState)
     end
 end
 
+-- From file: ApplyVisibility (exact copy, line 104-115)
 local function ApplyVisibility(petData, visible)
     local transparency = visible and 0 or 1
     for _, desc in pairs(petData.Model:GetDescendants()) do
@@ -290,7 +301,7 @@ local function BuildVisualPet(species, position, petType, size)
     model:SetAttribute("OwnerSlot", "VisualSlot")
     model:SetAttribute("PetVisual", true)
     
-    -- Primary part (exact from file)
+    -- Primary part setup (exact from file)
     local primary = model.PrimaryPart
     local fallback = not (primary and primary.Parent) and (
         model:FindFirstChild("Torso") or 
@@ -360,32 +371,21 @@ local function BuildVisualPet(species, position, petType, size)
     visualSlot:SetAttribute("SlotOffsetX", 3)
     visualSlot:SetAttribute("SlotOffsetZ", 3)
     
-    -- ============================================
-    -- FIX: Set SlotHeightOffset based on flyer status
-    -- ============================================
+    -- Set SlotHeightOffset based on flyer status
     if module.IsFlying == true then
-        -- Flyers need height offset to fly above ground
-        visualSlot:SetAttribute("SlotHeightOffset", 8) -- Flying height
+        visualSlot:SetAttribute("SlotHeightOffset", 8)
         visualSlot:SetAttribute("FlightPhase", "Flying")
     else
-        visualSlot:SetAttribute("SlotHeightOffset", 0) -- Ground pets
+        visualSlot:SetAttribute("SlotHeightOffset", 0)
     end
     
-    -- Get ground Y at spawn position
+    -- Position slot at spawn position (ground level)
     local spawnPos = position or Vector3.new(0, 10, 0)
     local groundY = CastGroundY(spawnPos, spawnPos.Y)
-    if not groundY then
-        groundY = spawnPos.Y
+    if groundY then
+        spawnPos = Vector3.new(spawnPos.X, groundY, spawnPos.Z)
     end
-    
-    -- For flyers: spawn at ground Y + flying height
-    -- For ground pets: spawn at ground Y
-    local slotY = groundY
-    if module.IsFlying == true then
-        slotY = groundY + 8 -- Start at flying height
-    end
-    
-    visualSlot.CFrame = CFrame.new(spawnPos.X, slotY, spawnPos.Z)
+    visualSlot.CFrame = CFrame.new(spawnPos)
     
     -- EnsureSlotAttachment (EXACT from file line 117)
     local slotAttachment = EnsureSlotAttachment(visualSlot, footOffset, pivotCF)
@@ -473,6 +473,8 @@ local function BuildVisualPet(species, position, petType, size)
         LastGoalChangeTime = nil,
         ForceFollowUntil = nil,
         VirtualSlotPos = nil,
+        -- For visual spawner
+        LastLocalGroundY = nil,
     }
     
     ApplyPetTypeTag(model, petType)
@@ -492,7 +494,7 @@ local function BuildVisualPet(species, position, petType, size)
     end)
     table.insert(petData.Connections, conn2)
     
-    -- FIX: Initial animation state for flyers
+    -- Initial animation state (exact from file's task.spawn)
     local initialState
     if petData.IsFlyer then
         local flightPhase = visualSlot:GetAttribute("FlightPhase") or "Flying"
@@ -509,7 +511,7 @@ local function BuildVisualPet(species, position, petType, size)
     ApplyVisibility(petData, true)
     
     table.insert(SpawnedPets, petData)
-    print("✅ Spawned:", species, "| Flyer:", petData.IsFlyer, "| Height:", module.IsFlying and 8 or 0)
+    print("✅ Spawned:", species, "| Flyer:", petData.IsFlyer)
     return petData
 end
 
@@ -547,6 +549,79 @@ function DestroyAllVisualPets()
 end
 
 -- ============================================
+-- SnapLocalPetsToFollow (EXACT from file)
+-- This snaps pets to follow position immediately
+-- ============================================
+
+local function SnapVisualPetToFollow(petData)
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local primary = petData.Primary
+    if not (primary and primary.Parent) then return end
+    
+    local slot = petData.Slot
+    if not slot then return end
+    
+    local hrpCF = hrp.CFrame
+    local lookVector = hrpCF.LookVector
+    local flatLook = Vector3.new(lookVector.X, 0, lookVector.Z)
+    local direction = flatLook.Magnitude < 0.0001 and Vector3.new(0, 0, -1) or flatLook.Unit
+    
+    local hrpPos = hrpCF.Position
+    local followCF = CFrame.lookAt(hrpPos, hrpPos + direction)
+    
+    local slotOffsetX = slot:GetAttribute("SlotOffsetX")
+    local slotOffsetZ = slot:GetAttribute("SlotOffsetZ")
+    if typeof(slotOffsetX) ~= "number" or typeof(slotOffsetZ) ~= "number" then
+        return
+    end
+    
+    local slotHeightOffset = slot:GetAttribute("SlotHeightOffset") or 0
+    local targetCF = followCF * CFrame.new(slotOffsetX, -2.5, slotOffsetZ)
+    local targetPos = targetCF.Position
+    
+    local groundY = CastGroundY(targetPos, targetPos.Y)
+    if groundY == nil then
+        groundY = targetPos.Y
+    end
+    petData.LastLocalGroundY = groundY
+    
+    local finalY
+    if petData.IsFlyer then
+        finalY = groundY + (petData.FootOffset or 0) + slotHeightOffset
+    else
+        finalY = groundY + (petData.FootOffset or 0)
+    end
+    
+    local finalPos = Vector3.new(targetPos.X, finalY, targetPos.Z)
+    local rotation = targetCF - targetCF.Position
+    local negLookX = -rotation.LookVector.X
+    local negLookZ = -rotation.LookVector.Z
+    local yaw = math.atan2(negLookX, negLookZ)
+    local pivotCF = petData.SpeciesPivotCFrame or CFrame.identity
+    
+    primary.CFrame = CFrame.new(finalPos) * CFrame.Angles(0, yaw, 0) * pivotCF
+    
+    petData.LocalGoalPos = finalPos
+    petData.LocalGoalRotation = rotation
+    petData.LastYaw = yaw
+    petData.LocalChase = true
+    petData.VirtualSlotPos = nil
+    petData.ForceFollowUntil = os.clock() + 0.4
+    
+    petData.LastVisualPos = finalPos
+    petData.LastVisualTime = os.clock()
+    petData.SmoothedSpeed = 0
+    petData.LastGoalChangeTime = nil
+    petData.LastTrackedGoalXZ = nil
+    petData.AnimState = "idle"
+end
+
+-- ============================================
 -- EXACT PET FOLLOW FROM FILE (RenderStepped)
 -- ============================================
 
@@ -561,7 +636,7 @@ local function UpdatePetFollow(petData, dt)
     if not (primary and primary.Parent) then return end
     
     local slot = petData.Slot
-    if not (slot and slot.Parent) then return end
+    if not slot then return end
     
     -- ============================================
     -- EXACT LOGIC FROM FILE'S RenderStepped
@@ -609,7 +684,6 @@ local function UpdatePetFollow(petData, dt)
         local v303 = v302.Position
         local v304
         if petData.IsFlyer then
-            -- FIX: For flyers, add SlotHeightOffset to Y
             v304 = v303.Y + v292
         else
             v304 = v303.Y
@@ -704,7 +778,6 @@ local function UpdatePetFollow(petData, dt)
         
         local v336
         if petData.IsFlyer then
-            -- FIX: Flyer height calculation (exact from file)
             local v337 = (slot:GetAttribute("SlotHeightOffset") or 0) / 1.5
             local v338 = math.clamp(v337, 0, 1)
             local v339 = v318.Y
@@ -721,7 +794,6 @@ local function UpdatePetFollow(petData, dt)
             else
                 v340 = v339
             end
-            -- Blend between ground height and flying height
             v336 = v340 * (1 - v338) + v339 * v338
         else
             local v347 = v320.Y
@@ -1257,7 +1329,11 @@ local function CreateSpawnerGUI()
             
             local petTypeVal = selectedType == "Rainbow" and PetTypes.Rainbow or nil
             
-            BuildVisualPet(species, pos, petTypeVal, selectedSize)
+            local pet = BuildVisualPet(species, pos, petTypeVal, selectedSize)
+            if pet then
+                -- Snap to follow immediately
+                SnapVisualPetToFollow(pet)
+            end
             manageTab.Text = "Manage (" .. #SpawnedPets .. ")"
         end)
     end
