@@ -359,15 +359,33 @@ local function BuildVisualPet(species, position, petType, size)
     -- Slot offsets (like real pets have)
     visualSlot:SetAttribute("SlotOffsetX", 3)
     visualSlot:SetAttribute("SlotOffsetZ", 3)
-    visualSlot:SetAttribute("SlotHeightOffset", 0)
     
-    -- FIX: Get ground Y first, then position slot there
+    -- ============================================
+    -- FIX: Set SlotHeightOffset based on flyer status
+    -- ============================================
+    if module.IsFlying == true then
+        -- Flyers need height offset to fly above ground
+        visualSlot:SetAttribute("SlotHeightOffset", 8) -- Flying height
+        visualSlot:SetAttribute("FlightPhase", "Flying")
+    else
+        visualSlot:SetAttribute("SlotHeightOffset", 0) -- Ground pets
+    end
+    
+    -- Get ground Y at spawn position
     local spawnPos = position or Vector3.new(0, 10, 0)
     local groundY = CastGroundY(spawnPos, spawnPos.Y)
-    if groundY then
-        spawnPos = Vector3.new(spawnPos.X, groundY, spawnPos.Z)
+    if not groundY then
+        groundY = spawnPos.Y
     end
-    visualSlot.CFrame = CFrame.new(spawnPos)
+    
+    -- For flyers: spawn at ground Y + flying height
+    -- For ground pets: spawn at ground Y
+    local slotY = groundY
+    if module.IsFlying == true then
+        slotY = groundY + 8 -- Start at flying height
+    end
+    
+    visualSlot.CFrame = CFrame.new(spawnPos.X, slotY, spawnPos.Z)
     
     -- EnsureSlotAttachment (EXACT from file line 117)
     local slotAttachment = EnsureSlotAttachment(visualSlot, footOffset, pivotCF)
@@ -477,7 +495,6 @@ local function BuildVisualPet(species, position, petType, size)
     -- FIX: Initial animation state for flyers
     local initialState
     if petData.IsFlyer then
-        -- Check FlightPhase attribute or default to flying
         local flightPhase = visualSlot:GetAttribute("FlightPhase") or "Flying"
         initialState = flightPhase == "Flying" and "flying" or 
                       (flightPhase == "Landing" and "landing" or 
@@ -492,7 +509,7 @@ local function BuildVisualPet(species, position, petType, size)
     ApplyVisibility(petData, true)
     
     table.insert(SpawnedPets, petData)
-    print("✅ Spawned:", species, "| Flyer:", petData.IsFlyer, "| Initial:", initialState)
+    print("✅ Spawned:", species, "| Flyer:", petData.IsFlyer, "| Height:", module.IsFlying and 8 or 0)
     return petData
 end
 
@@ -592,6 +609,7 @@ local function UpdatePetFollow(petData, dt)
         local v303 = v302.Position
         local v304
         if petData.IsFlyer then
+            -- FIX: For flyers, add SlotHeightOffset to Y
             v304 = v303.Y + v292
         else
             v304 = v303.Y
@@ -686,6 +704,7 @@ local function UpdatePetFollow(petData, dt)
         
         local v336
         if petData.IsFlyer then
+            -- FIX: Flyer height calculation (exact from file)
             local v337 = (slot:GetAttribute("SlotHeightOffset") or 0) / 1.5
             local v338 = math.clamp(v337, 0, 1)
             local v339 = v318.Y
@@ -702,6 +721,7 @@ local function UpdatePetFollow(petData, dt)
             else
                 v340 = v339
             end
+            -- Blend between ground height and flying height
             v336 = v340 * (1 - v338) + v339 * v338
         else
             local v347 = v320.Y
@@ -833,7 +853,6 @@ end
 
 -- ============================================
 -- EXACT ANIMATION STATE FROM FILE (Heartbeat)
--- FIX: Added flyer animation logic
 -- ============================================
 
 local function UpdatePetAnimation(petData, dt)
@@ -916,7 +935,6 @@ local function UpdatePetAnimation(petData, dt)
     
     -- ============================================
     -- ANIMATION STATE (EXACT from file's Heartbeat)
-    -- FIX: Added complete flyer logic
     -- ============================================
     if petData.IsFlyer then
         -- ============================================
