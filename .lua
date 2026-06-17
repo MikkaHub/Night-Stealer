@@ -361,14 +361,13 @@ local function BuildVisualPet(species, position, petType, size)
     visualSlot:SetAttribute("SlotOffsetZ", 3)
     visualSlot:SetAttribute("SlotHeightOffset", 0)
     
-    -- Position slot at spawn position
-    if position then
-        visualSlot.CFrame = CFrame.new(position)
-    else
-        local character = LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        visualSlot.CFrame = hrp and hrp.CFrame or CFrame.new(0, 10, 0)
+    -- FIX: Get ground Y first, then position slot there
+    local spawnPos = position or Vector3.new(0, 10, 0)
+    local groundY = CastGroundY(spawnPos, spawnPos.Y)
+    if groundY then
+        spawnPos = Vector3.new(spawnPos.X, groundY, spawnPos.Z)
     end
+    visualSlot.CFrame = CFrame.new(spawnPos)
     
     -- EnsureSlotAttachment (EXACT from file line 117)
     local slotAttachment = EnsureSlotAttachment(visualSlot, footOffset, pivotCF)
@@ -475,10 +474,15 @@ local function BuildVisualPet(species, position, petType, size)
     end)
     table.insert(petData.Connections, conn2)
     
-    -- Initial animation state (EXACT from file's task.spawn)
+    -- FIX: Initial animation state for flyers
     local initialState
     if petData.IsFlyer then
-        initialState = "flying"
+        -- Check FlightPhase attribute or default to flying
+        local flightPhase = visualSlot:GetAttribute("FlightPhase") or "Flying"
+        initialState = flightPhase == "Flying" and "flying" or 
+                      (flightPhase == "Landing" and "landing" or 
+                      (flightPhase == "Grounded" and "groundidle" or 
+                      (flightPhase == "Takeoff" and "takeoff" or "flying")))
     else
         initialState = "idle"
     end
@@ -488,7 +492,7 @@ local function BuildVisualPet(species, position, petType, size)
     ApplyVisibility(petData, true)
     
     table.insert(SpawnedPets, petData)
-    print("✅ Spawned:", species)
+    print("✅ Spawned:", species, "| Flyer:", petData.IsFlyer, "| Initial:", initialState)
     return petData
 end
 
@@ -829,6 +833,7 @@ end
 
 -- ============================================
 -- EXACT ANIMATION STATE FROM FILE (Heartbeat)
+-- FIX: Added flyer animation logic
 -- ============================================
 
 local function UpdatePetAnimation(petData, dt)
@@ -842,35 +847,141 @@ local function UpdatePetAnimation(petData, dt)
     local slotPos = slot.Position
     local now = os.clock()
     
-    if (petData.SlotGroundCastNext or 0) <= now then
-        local groundY = CastGroundY(slotPos, slotPos.Y)
-        if groundY ~= nil then
-            petData.SlotGroundCachedY = groundY
+    -- ============================================
+    -- FLYER SLOT ATTACHMENT (exact from file lines 418-434)
+    -- ============================================
+    local v419 = petData.SlotAttachment
+    if v419 and v419.Parent then
+        local v420 = petData.SpeciesPivotCFrame or CFrame.identity
+        local v421
+        
+        if petData.IsFlyer then
+            local v422 = (slot:GetAttribute("SlotHeightOffset") or 0) / 1.5
+            local v423 = math.clamp(v422, 0, 1)
+            local v424 = petData.FootOffset or 0
+            local v425 = slot:GetAttribute("Perched") == true
+            local v426 = slot:GetAttribute("FlightPhase") == "Takeoff"
+            local v427
+            
+            if v423 < 1 and not (v425 or v426) then
+                local v428 = os.clock()
+                if (petData.SlotGroundCastNext or 0) <= v428 then
+                    local v429 = CastGroundY(slotPos, slotPos.Y)
+                    if v429 ~= nil then
+                        petData.SlotGroundCachedY = v429
+                    end
+                    petData.SlotGroundCastNext = v428 + 0.06666666666666667
+                end
+                
+                local v430 = petData.SlotGroundCachedY
+                if v430 == nil then
+                    v430 = petData.LastGroundY or slotPos.Y
+                end
+                local v431 = petData.LastGroundY or v430
+                local v432 = 18 * dt
+                local v433 = math.clamp(v432, 0, 1)
+                local v434 = v431 + (v430 - v431) * v433
+                petData.LastGroundY = v434
+                v427 = v434 - slotPos.Y + (petData.FootOffset or 0)
+            else
+                v427 = v424
+            end
+            
+            v421 = v427 * (1 - v423) + v424 * v423
+        else
+            -- Ground pet slot attachment (exact from file)
+            local v435 = os.clock()
+            if (petData.SlotGroundCastNext or 0) <= v435 then
+                local v436 = CastGroundY(slotPos, slotPos.Y)
+                if v436 ~= nil then
+                    petData.SlotGroundCachedY = v436
+                end
+                petData.SlotGroundCastNext = v435 + 0.06666666666666667
+            end
+            
+            local v437 = petData.SlotGroundCachedY
+            if v437 == nil then
+                v437 = petData.LastGroundY or slotPos.Y
+            end
+            local v438 = petData.LastGroundY or v437
+            local v439 = 18 * dt
+            local v440 = math.clamp(v439, 0, 1)
+            local v441 = v438 + (v437 - v438) * v440
+            petData.LastGroundY = v441
+            v421 = v441 - slotPos.Y + (petData.FootOffset or 0)
         end
-        petData.SlotGroundCastNext = now + 0.06666666666666667
+        
+        v419.CFrame = CFrame.new(0, v421, 0) * v420
     end
     
-    local v437 = petData.SlotGroundCachedY
-    if v437 == nil then
-        v437 = petData.LastGroundY or slotPos.Y
-    end
-    local v438 = petData.LastGroundY or v437
-    local v439 = 18 * dt
-    local v440 = math.clamp(v439, 0, 1)
-    local v441 = v438 + (v437 - v438) * v440
-    petData.LastGroundY = v441
-    
-    local v421 = v441 - slotPos.Y + (petData.FootOffset or 0)
-    petData.SlotAttachment.CFrame = CFrame.new(0, v421, 0) * petData.SpeciesPivotCFrame
-    
     -- ============================================
-    -- Animation state (EXACT from file's Heartbeat)
+    -- ANIMATION STATE (EXACT from file's Heartbeat)
+    -- FIX: Added complete flyer logic
     -- ============================================
-    local v455 = os.clock()
-    local v456 = 0
-    
-    if primary then
-        local v457 = primary.Position
+    if petData.IsFlyer then
+        -- ============================================
+        -- FLYER ANIMATION (exact from file lines 442-454)
+        -- ============================================
+        local v442 = slot:GetAttribute("FlightPhase") or "Flying"
+        local v443 = v442 == "Flying" and "flying" or 
+                    (v442 == "Landing" and "landing" or 
+                    (v442 == "Grounded" and "groundidle" or 
+                    (v442 == "Takeoff" and "takeoff" or "flying")))
+        
+        local v444 = petData.Module
+        if v444 then
+            v444 = petData.Module.Animations
+        end
+        
+        -- FlyIdle speed-based switching (exact from file)
+        if v443 == "flying" and (v444 and v444.FlyIdle) then
+            local v445 = os.clock()
+            local v446 = 0
+            
+            local v447 = petData.Primary
+            if v447 then
+                v447 = petData.Primary.Position
+            end
+            
+            if v447 then
+                if petData.LastVisualPos and petData.LastVisualTime then
+                    local v448 = v445 - petData.LastVisualTime
+                    local v449 = math.max(0.001, v448)
+                    local v450 = (v447 - petData.LastVisualPos).Magnitude
+                    if v450 < 50 then
+                        v446 = v450 / v449
+                    end
+                end
+                petData.LastVisualPos = v447
+                petData.LastVisualTime = v445
+            end
+            
+            local v451 = dt * 6
+            local v452 = math.clamp(v451, 0, 1)
+            petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - v452) + v446 * v452
+            
+            local v453 = petData.SmoothedSpeed
+            local v454 = petData.AnimState
+            v443 = v453 > 2 and "flying" or 
+                   (v453 < 0.6 and "flyidle" or 
+                   (v454 ~= "flying" and v454 ~= "flyidle" and "flying" or v454))
+        end
+        
+        petData.AnimState = v443
+        SwitchState(petData, v443)
+        
+    else
+        -- ============================================
+        -- GROUND PET ANIMATION (exact from file lines 455-465)
+        -- ============================================
+        local v455 = os.clock()
+        local v456 = 0
+        
+        local v457 = petData.Primary
+        if v457 then
+            v457 = petData.Primary.Position
+        end
+        
         if v457 then
             if petData.LastVisualPos and petData.LastVisualTime then
                 local v458 = v455 - petData.LastVisualTime
@@ -883,17 +994,18 @@ local function UpdatePetAnimation(petData, dt)
             petData.LastVisualPos = v457
             petData.LastVisualTime = v455
         end
+        
+        local v461 = dt * 6
+        local v462 = math.clamp(v461, 0, 1)
+        petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - v462) + v456 * v462
+        
+        local v463 = petData.SmoothedSpeed
+        local v464 = petData.AnimState or "idle"
+        local v465 = v464 == "idle" and v463 > 2 and "walking" or 
+                      (v464 == "walking" and v463 < 0.6 and "idle" or v464)
+        petData.AnimState = v465
+        SwitchState(petData, v465)
     end
-    
-    local v461 = dt * 6
-    local v462 = math.clamp(v461, 0, 1)
-    petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - v462) + v456 * v462
-    
-    local v463 = petData.SmoothedSpeed
-    local v464 = petData.AnimState or "idle"
-    local v465 = v464 == "idle" and v463 > 2 and "walking" or (v464 == "walking" and v463 < 0.6 and "idle" or v464)
-    petData.AnimState = v465
-    SwitchState(petData, v465)
 end
 
 -- ============================================
@@ -1008,7 +1120,6 @@ local function CreateSpawnerGUI()
         manageFrame.Visible = true
         spawnTab.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
         manageTab.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
-        -- Refresh list
         refreshManageList()
     end)
     
@@ -1111,7 +1222,7 @@ local function CreateSpawnerGUI()
         local btn = Instance.new("TextButton")
         btn.Name = species .. "Btn"
         btn.Size = UDim2.new(1, -5, 0, 30)
-        btn.Text = "  📌 " .. species
+        btn.Text = "  📌 " .. species .. (module.IsFlying and " 🦅" or "")
         btn.TextXAlignment = Enum.TextXAlignment.Left
         btn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
         btn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1124,7 +1235,7 @@ local function CreateSpawnerGUI()
         btn.MouseButton1Click:Connect(function()
             local character = LocalPlayer.Character
             local hrp = character and character:FindFirstChild("HumanoidRootPart")
-            local pos = hrp and (hrp.Position + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))) or Vector3.new(0, 10, 0)
+            local pos = hrp and hrp.Position or Vector3.new(0, 10, 0)
             
             local petTypeVal = selectedType == "Rainbow" and PetTypes.Rainbow or nil
             
@@ -1148,7 +1259,6 @@ local function CreateSpawnerGUI()
     Instance.new("UIListLayout", manageScroll).Padding = UDim.new(0, 4)
     
     local function refreshManageList()
-        -- Clear old
         for _, child in pairs(manageScroll:GetChildren()) do
             if child:IsA("TextButton") or child:IsA("Frame") then
                 child:Destroy()
@@ -1176,9 +1286,9 @@ local function CreateSpawnerGUI()
             Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
             
             local nameLabel = Instance.new("TextLabel")
-            nameLabel.Size = UDim2.new(0.6, 0, 1, 0)
+            nameLabel.Size = UDim2.new(0.55, 0, 1, 0)
             nameLabel.Position = UDim2.new(0.02, 0, 0, 0)
-            nameLabel.Text = petData.Species
+            nameLabel.Text = petData.Species .. (petData.IsFlyer and " 🦅" or "")
             nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             nameLabel.BackgroundTransparency = 1
             nameLabel.Font = Enum.Font.Gotham
@@ -1187,8 +1297,8 @@ local function CreateSpawnerGUI()
             nameLabel.Parent = row
             
             local delBtn = Instance.new("TextButton")
-            delBtn.Size = UDim2.new(0.35, 0, 0.8, 0)
-            delBtn.Position = UDim2.new(0.63, 0, 0.1, 0)
+            delBtn.Size = UDim2.new(0.4, 0, 0.8, 0)
+            delBtn.Position = UDim2.new(0.58, 0, 0.1, 0)
             delBtn.Text = "❌ Delete"
             delBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
             delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
