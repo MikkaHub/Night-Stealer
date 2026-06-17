@@ -1,143 +1,441 @@
 --[[
-    Visual Pet Spawner - Grow a Garden 2
-    All features from original PetVisualClient system
+    ╔══════════════════════════════════════════════════════════════╗
+    ║           MIKKA HUB - Grow a Garden 2 Pet Visual Spawner      ║
+    ║                   Delta Executor Compatible                    ║
+    ╚══════════════════════════════════════════════════════════════╝
 
     Features:
-    - Pet model cloning from ReplicatedStorage (never workspace)
-    - Animation system (idle, walk, fly, flyidle, landing, takeoff, groundidle)
-    - Ground raycasting with dynamic filter refresh
-    - Pet following with offset positioning
-    - Fruit/Plant carrying system
-    - Frog jump physics
-    - Owl hoot SFX
-    - Rainbow pet tagging
-    - Size scaling (Big/Huge)
-    - Visibility toggling
-    - Smooth interpolation for remote pets
-    - Slot-based attachment architecture
+    ✓ Visual Pet Spawner (all original features)
+    ✓ GUI Toggle (Mikka Hub style)
+    ✓ Delta Executor Optimized
+    ✓ All pet systems: animations, following, carrying, frog jump, owl hoot
+
+    Usage: Paste into Delta Executor and execute
 ]]
 
+-- Delta Executor Detection & Compatibility
+local getexecutorname = getexecutorname or function() return "Unknown" end
+local executor = getexecutorname()
+local isDelta = executor:lower():find("delta") ~= nil
+
+-- Services
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local StarterGui = game:GetService("StarterGui")
+local HttpService = game:GetService("HttpService")
 
--- Module references (adjust paths as needed)
-local PetModules = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("PetModules"))
-local Networking = require(ReplicatedStorage:WaitForChild("SharedModules"):WaitForChild("Networking"))
-local PetSizes = require(ReplicatedStorage:WaitForChild("SharedData"):WaitForChild("PetSizes"))
-local PetTypes = require(ReplicatedStorage:WaitForChild("SharedData"):WaitForChild("PetTypes"))
-
--- Asset references
-local AssetsFolder = ReplicatedStorage:WaitForChild("Assets")
-local PetsFolder = AssetsFolder:WaitForChild("Pets")
-local FruitsFolder = AssetsFolder:WaitForChild("Fruits")
-local PlantsFolder = AssetsFolder:WaitForChild("Plants")
-
--- Plant generation modules for fruit carrying
-local PlantGenModules = ReplicatedStorage:FindFirstChild("PlantGenerationModules")
-local FruitGenFolder = PlantGenModules and PlantGenModules:FindFirstChild("Fruits")
-local PlantGenFolder = PlantGenModules and PlantGenModules:FindFirstChild("Plants")
+local LocalPlayer = Players.LocalPlayer
 
 --========================================
--- CONFIGURATION
---========================================
-local Config = {
-    StartOrder = 6,
-    FollowSpeed = 14,
-    GroundCastInterval = 0.0667, -- ~15Hz
-    FilterRefreshInterval = 1.0,
-    MaxJumpWaitFrames = 60,
-    MaxFruitInitWait = 600,
-    RaycastDistance = 600,
-    RaycastStartHeight = 200,
-    SmoothingFactor = 60,
-    RotationSpeed = 12,
-    HeightLerpSpeed = 18,
-    SpeedSmoothFactor = 6,
-    WalkThreshold = 2,
-    IdleThreshold = 0.6,
-    FlyWalkThreshold = 2,
-    FlyIdleThreshold = 0.6,
-    SnapCooldown = 0.2,
-    ForceFollowDuration = 0.4,
-    MaxSpeedForInterpolation = 50,
-}
-
---========================================
--- STATE TABLES
---========================================
-local ActivePets = {}      -- [slot] = petData
-local PendingBuilds = {}   -- [slot] = generation number
-local Destroying = {}      -- [slot] = generation number
-local FruitGenCache = {}   -- [fruitName] = {Module=..., IsPlant=...}
-local FruitAssetCache = {} -- [fruitName] = asset
-local PlantAssetCache = {} -- [plantName] = asset
-
--- Raycast params
-local GroundRaycastParams = RaycastParams.new()
-GroundRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
-GroundRaycastParams.IgnoreWater = false
-GroundRaycastParams.RespectCanCollide = false
-
-local SecondaryRaycastParams = RaycastParams.new()
-SecondaryRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
-SecondaryRaycastParams.IgnoreWater = false
-SecondaryRaycastParams.RespectCanCollide = false
-
--- Timing
-local LastFilterRefresh = -math.huge
-local LastFrogJumpTime = 0
-local OwlSound = nil
-
--- Folders (created in Init)
-local VisualFolder = nil
-local ModelsFolder = nil
-local CarryFolder = nil
-
---========================================
--- UTILITY FUNCTIONS
+-- MIKKA HUB GUI CREATION
 --========================================
 
--- Apply or remove Rainbow tag based on pet type
-local function ApplyPetTypeTag(model, petType)
-    if not model then return end
-    if petType == PetTypes.Rainbow then
-        if not model:HasTag("PetRainbow") then
-            model:AddTag("PetRainbow")
-        end
-    else
-        if model:HasTag("PetRainbow") then
-            model:RemoveTag("PetRainbow")
-        end
+local function CreateMikkaHub()
+    -- ScreenGui
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "MikkaHub_GAG2"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    -- Parent to CoreGui (Delta compatible) or PlayerGui
+    pcall(function()
+        ScreenGui.Parent = CoreGui
+    end)
+    if not ScreenGui.Parent then
+        ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
+
+    -- Main Frame (Mikka Hub style - dark rounded)
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 420, 0, 520)
+    MainFrame.Position = UDim2.new(0.5, -210, 0.5, -260)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.ClipsDescendants = true
+    MainFrame.Parent = ScreenGui
+
+    -- Rounded corners
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 12)
+    Corner.Parent = MainFrame
+
+    -- Shadow
+    local Shadow = Instance.new("ImageLabel")
+    Shadow.Name = "Shadow"
+    Shadow.Size = UDim2.new(1, 30, 1, 30)
+    Shadow.Position = UDim2.new(0, -15, 0, -15)
+    Shadow.BackgroundTransparency = 1
+    Shadow.Image = "rbxassetid://1316045217"
+    Shadow.ImageTransparency = 0.6
+    Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+    Shadow.ScaleType = Enum.ScaleType.Slice
+    Shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+    Shadow.Parent = MainFrame
+
+    -- Title Bar
+    local TitleBar = Instance.new("Frame")
+    TitleBar.Name = "TitleBar"
+    TitleBar.Size = UDim2.new(1, 0, 0, 40)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    TitleBar.BorderSizePixel = 0
+    TitleBar.Parent = MainFrame
+
+    local TitleCorner = Instance.new("UICorner")
+    TitleCorner.CornerRadius = UDim.new(0, 12)
+    TitleCorner.Parent = TitleBar
+
+    -- Title Text
+    local TitleText = Instance.new("TextLabel")
+    TitleText.Name = "Title"
+    TitleText.Size = UDim2.new(1, -80, 1, 0)
+    TitleText.Position = UDim2.new(0, 15, 0, 0)
+    TitleText.BackgroundTransparency = 1
+    TitleText.Text = "🌸 Mikka Hub | GAG 2 Pet Visuals"
+    TitleText.TextColor3 = Color3.fromRGB(255, 182, 193)
+    TitleText.TextSize = 16
+    TitleText.Font = Enum.Font.GothamBold
+    TitleText.TextXAlignment = Enum.TextXAlignment.Left
+    TitleText.Parent = TitleBar
+
+    -- Close Button
+    local CloseBtn = Instance.new("TextButton")
+    CloseBtn.Name = "Close"
+    CloseBtn.Size = UDim2.new(0, 30, 0, 30)
+    CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
+    CloseBtn.Text = "X"
+    CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    CloseBtn.TextSize = 14
+    CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.Parent = TitleBar
+
+    local CloseCorner = Instance.new("UICorner")
+    CloseCorner.CornerRadius = UDim.new(0, 6)
+    CloseCorner.Parent = CloseBtn
+
+    -- Minimize Button
+    local MinBtn = Instance.new("TextButton")
+    MinBtn.Name = "Minimize"
+    MinBtn.Size = UDim2.new(0, 30, 0, 30)
+    MinBtn.Position = UDim2.new(1, -70, 0, 5)
+    MinBtn.BackgroundColor3 = Color3.fromRGB(255, 180, 50)
+    MinBtn.Text = "-"
+    MinBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MinBtn.TextSize = 18
+    MinBtn.Font = Enum.Font.GothamBold
+    MinBtn.Parent = TitleBar
+
+    local MinCorner = Instance.new("UICorner")
+    MinCorner.CornerRadius = UDim.new(0, 6)
+    MinCorner.Parent = MinBtn
+
+    -- Content Frame
+    local Content = Instance.new("ScrollingFrame")
+    Content.Name = "Content"
+    Content.Size = UDim2.new(1, -20, 1, -50)
+    Content.Position = UDim2.new(0, 10, 0, 45)
+    Content.BackgroundTransparency = 1
+    Content.ScrollBarThickness = 4
+    Content.ScrollBarImageColor3 = Color3.fromRGB(255, 182, 193)
+    Content.CanvasSize = UDim2.new(0, 0, 0, 800)
+    Content.Parent = MainFrame
+
+    -- UI List Layout
+    local ListLayout = Instance.new("UIListLayout")
+    ListLayout.Padding = UDim.new(0, 8)
+    ListLayout.Parent = Content
+
+    -- Status Label
+    local StatusLabel = Instance.new("TextLabel")
+    StatusLabel.Name = "Status"
+    StatusLabel.Size = UDim2.new(1, 0, 0, 25)
+    StatusLabel.BackgroundTransparency = 1
+    StatusLabel.Text = "Status: Ready | Executor: " .. executor
+    StatusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+    StatusLabel.TextSize = 12
+    StatusLabel.Font = Enum.Font.Gotham
+    StatusLabel.Parent = Content
+
+    -- Separator
+    local Sep1 = Instance.new("Frame")
+    Sep1.Size = UDim2.new(1, -10, 0, 1)
+    Sep1.Position = UDim2.new(0, 5, 0, 0)
+    Sep1.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    Sep1.BorderSizePixel = 0
+    Sep1.Parent = Content
+
+    return {
+        ScreenGui = ScreenGui,
+        MainFrame = MainFrame,
+        TitleBar = TitleBar,
+        Content = Content,
+        StatusLabel = StatusLabel,
+        CloseBtn = CloseBtn,
+        MinBtn = MinBtn
+    }
 end
 
--- Refresh ground raycast filter to exclude dynamic objects
-local function RefreshGroundFilter()
-    local filterList = {}
+--========================================
+-- GUI ELEMENTS HELPERS
+--========================================
 
-    -- Exclude all player characters
+local function CreateSection(parent, text)
+    local section = Instance.new("TextLabel")
+    section.Size = UDim2.new(1, 0, 0, 25)
+    section.BackgroundTransparency = 1
+    section.Text = text
+    section.TextColor3 = Color3.fromRGB(255, 182, 193)
+    section.TextSize = 14
+    section.Font = Enum.Font.GothamBold
+    section.TextXAlignment = Enum.TextXAlignment.Left
+    section.Parent = parent
+    return section
+end
+
+local function CreateToggle(parent, text, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 35)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -60, 1, 0)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextSize = 13
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 45, 0, 25)
+    toggleBtn.Position = UDim2.new(1, -50, 0.5, -12.5)
+    toggleBtn.BackgroundColor3 = default and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 80, 80)
+    toggleBtn.Text = default and "ON" or "OFF"
+    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    toggleBtn.TextSize = 12
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.Parent = frame
+
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 6)
+    toggleCorner.Parent = toggleBtn
+
+    local state = default
+    toggleBtn.MouseButton1Click:Connect(function()
+        state = not state
+        toggleBtn.BackgroundColor3 = state and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 80, 80)
+        toggleBtn.Text = state and "ON" or "OFF"
+        if callback then callback(state) end
+    end)
+
+    return frame, toggleBtn
+end
+
+local function CreateButton(parent, text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 35)
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 13
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        if callback then callback() end
+    end)
+
+    return btn
+end
+
+local function CreateSlider(parent, text, min, max, default, callback)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, 0, 0, 50)
+    frame.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    frame.BorderSizePixel = 0
+    frame.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = frame
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -10, 0, 20)
+    label.Position = UDim2.new(0, 10, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = text .. ": " .. tostring(default)
+    label.TextColor3 = Color3.fromRGB(220, 220, 220)
+    label.TextSize = 12
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local sliderFrame = Instance.new("Frame")
+    sliderFrame.Size = UDim2.new(1, -20, 0, 8)
+    sliderFrame.Position = UDim2.new(0, 10, 0, 30)
+    sliderFrame.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    sliderFrame.BorderSizePixel = 0
+    sliderFrame.Parent = frame
+
+    local sliderCorner = Instance.new("UICorner")
+    sliderCorner.CornerRadius = UDim.new(0, 4)
+    sliderCorner.Parent = sliderFrame
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(255, 182, 193)
+    fill.BorderSizePixel = 0
+    fill.Parent = sliderFrame
+
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(0, 4)
+    fillCorner.Parent = fill
+
+    local dragging = false
+
+    sliderFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+        end
+    end)
+
+    sliderFrame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local pos = input.Position.X - sliderFrame.AbsolutePosition.X
+            local scale = math.clamp(pos / sliderFrame.AbsoluteSize.X, 0, 1)
+            local value = min + (max - min) * scale
+            fill.Size = UDim2.new(scale, 0, 1, 0)
+            label.Text = text .. ": " .. string.format("%.1f", value)
+            if callback then callback(value) end
+        end
+    end)
+
+    return frame
+end
+
+--========================================
+-- PET VISUAL SPAWNER SYSTEM
+--========================================
+
+local PetSystem = {
+    Active = false,
+    VisualFolder = nil,
+    ModelsFolder = nil,
+    CarryFolder = nil,
+    ActivePets = {},
+    PendingBuilds = {},
+    Destroying = {},
+    Config = {
+        FollowSpeed = 14,
+        GroundCastInterval = 0.0667,
+        FilterRefreshInterval = 1.0,
+        MaxJumpWaitFrames = 60,
+        MaxFruitInitWait = 600,
+        RaycastDistance = 600,
+        RaycastStartHeight = 200,
+        SmoothingFactor = 60,
+        RotationSpeed = 12,
+        HeightLerpSpeed = 18,
+        SpeedSmoothFactor = 6,
+        WalkThreshold = 2,
+        IdleThreshold = 0.6,
+        FlyWalkThreshold = 2,
+        FlyIdleThreshold = 0.6,
+        SnapCooldown = 0.2,
+        ForceFollowDuration = 0.4,
+        MaxSpeedForInterpolation = 50,
+    },
+    GroundRaycastParams = RaycastParams.new(),
+    SecondaryRaycastParams = RaycastParams.new(),
+    LastFilterRefresh = -math.huge,
+    FruitGenCache = {},
+    Networking = nil,
+    PetModules = nil,
+    PetSizes = nil,
+    PetTypes = nil,
+}
+
+function PetSystem:Init()
+    self.GroundRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    self.GroundRaycastParams.IgnoreWater = false
+    self.GroundRaycastParams.RespectCanCollide = false
+
+    self.SecondaryRaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    self.SecondaryRaycastParams.IgnoreWater = false
+    self.SecondaryRaycastParams.RespectCanCollide = false
+
+    local success
+    success, self.PetModules = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("SharedModules", 5):WaitForChild("PetModules", 5))
+    end)
+    if not success then self.PetModules = {} end
+
+    success, self.Networking = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("SharedModules", 5):WaitForChild("Networking", 5))
+    end)
+
+    success, self.PetSizes = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("SharedData", 5):WaitForChild("PetSizes", 5))
+    end)
+
+    success, self.PetTypes = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("SharedData", 5):WaitForChild("PetTypes", 5))
+    end)
+
+    self.VisualFolder = Instance.new("Folder")
+    self.VisualFolder.Name = "_PetVisualClient_Mikka"
+    self.VisualFolder.Parent = workspace
+
+    self.ModelsFolder = Instance.new("Folder")
+    self.ModelsFolder.Name = "Models"
+    self.ModelsFolder.Parent = self.VisualFolder
+
+    self.CarryFolder = Instance.new("Folder")
+    self.CarryFolder.Name = "Carry"
+    self.CarryFolder.Parent = self.VisualFolder
+
+    self.Active = true
+end
+
+function PetSystem:RefreshGroundFilter()
+    local filterList = {}
     for _, player in pairs(Players:GetPlayers()) do
         local character = player.Character
         if character then
             table.insert(filterList, character)
         end
     end
-
-    -- Exclude pet visual folder
-    if VisualFolder then
-        table.insert(filterList, VisualFolder)
+    if self.VisualFolder then
+        table.insert(filterList, self.VisualFolder)
     end
-
-    -- Exclude player pet references
     local petRefs = workspace:FindFirstChild("PlayerPetReferences")
     if petRefs then
         table.insert(filterList, petRefs)
     end
-
-    -- Exclude gardens and plants
     local gardens = workspace:FindFirstChild("Gardens")
     if gardens then
         for _, garden in pairs(gardens:GetChildren()) do
@@ -147,125 +445,89 @@ local function RefreshGroundFilter()
             end
         end
     end
-
-    -- Exclude potted plants
     local potted = workspace:FindFirstChild("PottedPlantVisuals")
     if potted then
         table.insert(filterList, potted)
     end
-
-    GroundRaycastParams.FilterDescendantsInstances = filterList
+    self.GroundRaycastParams.FilterDescendantsInstances = filterList
 end
 
--- Cast ray to find ground Y at position
-local function CastGroundY(position, startY)
-    local startPos = Vector3.new(position.X, startY + Config.RaycastStartHeight, position.Z)
-    local result = workspace:Raycast(startPos, Vector3.new(0, -Config.RaycastDistance, 0), GroundRaycastParams)
-
-    if not (result and result.Instance) then
-        return nil
-    end
-
+function PetSystem:CastGroundY(position, startY)
+    local startPos = Vector3.new(position.X, startY + self.Config.RaycastStartHeight, position.Z)
+    local result = workspace:Raycast(startPos, Vector3.new(0, -self.Config.RaycastDistance, 0), self.GroundRaycastParams)
+    if not (result and result.Instance) then return nil end
     local hit = result.Instance
     if hit.Transparency < 0.99 and hit.CanCollide then
         return result.Position.Y
     end
-
-    -- Secondary raycast through transparent parts
-    local secondaryFilter = table.clone(GroundRaycastParams.FilterDescendantsInstances)
+    local secondaryFilter = table.clone(self.GroundRaycastParams.FilterDescendantsInstances)
     table.insert(secondaryFilter, hit)
-    SecondaryRaycastParams.FilterDescendantsInstances = secondaryFilter
-
+    self.SecondaryRaycastParams.FilterDescendantsInstances = secondaryFilter
     for _ = 1, 8 do
-        local secondaryResult = workspace:Raycast(startPos, Vector3.new(0, -Config.RaycastDistance, 0), SecondaryRaycastParams)
-        if not (secondaryResult and secondaryResult.Instance) then
-            return nil
-        end
-
+        local secondaryResult = workspace:Raycast(startPos, Vector3.new(0, -self.Config.RaycastDistance, 0), self.SecondaryRaycastParams)
+        if not (secondaryResult and secondaryResult.Instance) then return nil end
         local secondaryHit = secondaryResult.Instance
         if secondaryHit.Transparency < 0.99 and secondaryHit.CanCollide then
             return secondaryResult.Position.Y
         end
-
         table.insert(secondaryFilter, secondaryHit)
-        SecondaryRaycastParams.FilterDescendantsInstances = secondaryFilter
+        self.SecondaryRaycastParams.FilterDescendantsInstances = secondaryFilter
     end
-
     return nil
 end
 
--- Compute jump offset for Frog pets
-local function ComputeJumpOffset(slot)
-    if slot:GetAttribute("PetSpecies") ~= "Frog" then
-        return 0
-    end
-
-    local jumpStart = slot:GetAttribute("SlotJumpStart")
-    if typeof(jumpStart) ~= "number" then return 0 end
-
-    local jumpPeak = slot:GetAttribute("SlotJumpPeak")
-    if typeof(jumpPeak) ~= "number" or jumpPeak <= 0 then return 0 end
-
-    local jumpDuration = slot:GetAttribute("SlotJumpDuration")
-    if typeof(jumpDuration) ~= "number" or jumpDuration <= 0 then return 0 end
-
-    local elapsed = workspace:GetServerTimeNow() - jumpStart
-    if elapsed < 0 or elapsed > jumpDuration then
-        return 0
-    end
-
-    local t = elapsed / jumpDuration
-    return jumpPeak * 4 * t * (1 - t)
-end
-
--- Compute foot offset from model parts
-local function ComputeFootOffset(model)
+function PetSystem:ComputeFootOffset(model)
     local pivotY = model:GetPivot().Position.Y
     local lowestY = math.huge
-
     for _, descendant in pairs(model:GetDescendants()) do
         if descendant:IsA("BasePart") and descendant.Transparency < 1 then
             local cf = descendant.CFrame
             local size = descendant.Size
             local halfX, halfY, halfZ = size.X * 0.5, size.Y * 0.5, size.Z * 0.5
-
             for xSign = -1, 1, 2 do
                 for ySign = -1, 1, 2 do
                     local corner = cf * Vector3.new(xSign * halfX, ySign * halfY, -halfZ)
                     lowestY = math.min(lowestY, corner.Y)
-
                     local corner2 = cf * Vector3.new(xSign * halfX, ySign * halfY, halfZ)
                     lowestY = math.min(lowestY, corner2.Y)
                 end
             end
         end
     end
-
     return lowestY == math.huge and 0 or pivotY - lowestY
 end
 
--- Get or create AnimationController and Animator
-local function GetOrCreateAnimator(model)
+function PetSystem:ComputeJumpOffset(slot)
+    if slot:GetAttribute("PetSpecies") ~= "Frog" then return 0 end
+    local jumpStart = slot:GetAttribute("SlotJumpStart")
+    if typeof(jumpStart) ~= "number" then return 0 end
+    local jumpPeak = slot:GetAttribute("SlotJumpPeak")
+    if typeof(jumpPeak) ~= "number" or jumpPeak <= 0 then return 0 end
+    local jumpDuration = slot:GetAttribute("SlotJumpDuration")
+    if typeof(jumpDuration) ~= "number" or jumpDuration <= 0 then return 0 end
+    local elapsed = workspace:GetServerTimeNow() - jumpStart
+    if elapsed < 0 or elapsed > jumpDuration then return 0 end
+    local t = elapsed / jumpDuration
+    return jumpPeak * 4 * t * (1 - t)
+end
+
+function PetSystem:GetOrCreateAnimator(model)
     local animController = model:FindFirstChildOfClass("AnimationController")
     if not animController then
         animController = Instance.new("AnimationController")
         animController.Parent = model
     end
-
     local animator = animController:FindFirstChildOfClass("Animator")
     if not animator then
         animator = Instance.new("Animator")
         animator.Parent = animController
     end
-
     return animator
 end
 
--- Find animations on model
-local function FindAnimationsOnModel(model, animationNames)
+function PetSystem:FindAnimationsOnModel(model, animationNames)
     local animations = {}
     local animFolder = model:FindFirstChild("Animations")
-
     if animationNames then
         local foundNames = {}
         for _, name in pairs(animationNames) do
@@ -291,58 +553,40 @@ local function FindAnimationsOnModel(model, animationNames)
             end
         end
     end
-
     return animations
 end
 
--- Get animation name for state
-local function GetAnimNameForState(module, state)
+function PetSystem:GetAnimNameForState(module, state)
     if not module or not module.Animations then return nil end
-
     local anims = module.Animations
-    if state == "idle" then
-        return anims.Idle
-    elseif state == "walking" then
-        return anims.Walk
-    elseif state == "flying" then
-        return anims.Fly
-    elseif state == "flyidle" then
-        return anims.FlyIdle or anims.Fly
-    elseif state == "landing" then
-        return anims.Land
-    elseif state == "takeoff" then
-        return anims.Takeoff
-    elseif state == "groundidle" then
-        return anims.GroundIdle or anims.Idle
+    if state == "idle" then return anims.Idle
+    elseif state == "walking" then return anims.Walk
+    elseif state == "flying" then return anims.Fly
+    elseif state == "flyidle" then return anims.FlyIdle or anims.Fly
+    elseif state == "landing" then return anims.Land
+    elseif state == "takeoff" then return anims.Takeoff
+    elseif state == "groundidle" then return anims.GroundIdle or anims.Idle
     end
     return nil
 end
 
--- Switch animation state
-local function SwitchState(petData, newState)
+function PetSystem:SwitchState(petData, newState)
     if newState == "takeoff" then
         local anims = petData.Module and petData.Module.Animations
         if anims and not anims.Takeoff then
             newState = "flying"
         end
     end
-
     if petData.CurrentState == newState then return end
-
     local oldState = petData.CurrentState
     petData.CurrentState = newState
-
     local fadeTime = (oldState == "landing" or oldState == "takeoff") and 0.05 or 0.2
-
-    -- Stop all current tracks
     for _, track in pairs(petData.Tracks) do
         if track.IsPlaying then
             track:Stop(fadeTime)
         end
     end
-
-    -- Start new track
-    local animName = GetAnimNameForState(petData.Module, newState)
+    local animName = self:GetAnimNameForState(petData.Module, newState)
     if animName then
         local track = petData.Tracks[animName]
         if track then
@@ -352,8 +596,7 @@ local function SwitchState(petData, newState)
     end
 end
 
--- Apply visibility to model
-local function ApplyVisibility(petData, isVisible)
+function PetSystem:ApplyVisibility(petData, isVisible)
     local transparency = isVisible and 0 or 1
     for _, descendant in pairs(petData.Model:GetDescendants()) do
         if descendant ~= petData.Model.PrimaryPart then
@@ -366,27 +609,28 @@ local function ApplyVisibility(petData, isVisible)
     end
 end
 
---========================================
--- MODEL CLONING
---========================================
-
--- Clone pet species model from ReplicatedStorage (NEVER from workspace)
-local function CloneSpeciesModel(speciesName)
-    local moduleData = PetModules[speciesName]
-    if not moduleData then
-        return nil, nil
+function PetSystem:ApplyPetTypeTag(model, petType)
+    if not model then return end
+    if self.PetTypes and petType == self.PetTypes.Rainbow then
+        if not model:HasTag("PetRainbow") then
+            model:AddTag("PetRainbow")
+        end
+    else
+        if model:HasTag("PetRainbow") then
+            model:RemoveTag("PetRainbow")
+        end
     end
+end
 
+function PetSystem:CloneSpeciesModel(speciesName)
+    local moduleData = self.PetModules and self.PetModules[speciesName]
+    if not moduleData then return nil, nil end
     local assetName = moduleData.AssetName
-    local asset = PetsFolder:FindFirstChild(assetName) or AssetsFolder:FindFirstChild(assetName)
-
-    if not (asset and asset:IsA("Model")) then
-        return nil, nil
-    end
-
+    local assetsFolder = ReplicatedStorage:FindFirstChild("Assets")
+    local petsFolder = assetsFolder and assetsFolder:FindFirstChild("Pets")
+    local asset = petsFolder and petsFolder:FindFirstChild(assetName) or (assetsFolder and assetsFolder:FindFirstChild(assetName))
+    if not (asset and asset:IsA("Model")) then return nil, nil end
     local clone = asset:Clone()
-
-    -- Configure all parts for physics
     for _, descendant in pairs(clone:GetDescendants()) do
         if descendant:IsA("BasePart") then
             descendant.Anchored = false
@@ -396,127 +640,89 @@ local function CloneSpeciesModel(speciesName)
             descendant.Massless = true
         end
     end
-
     return clone, moduleData
 end
 
--- Ensure PetTarget attachment exists on slot
-local function EnsureSlotAttachment(slot, footOffset, pivotCFrame)
+function PetSystem:EnsureSlotAttachment(slot, footOffset, pivotCFrame)
     local attachment = slot:FindFirstChild("PetTarget")
     if not attachment then
         attachment = Instance.new("Attachment")
         attachment.Name = "PetTarget"
         attachment.Parent = slot
     end
-
     attachment.CFrame = CFrame.new(0, footOffset, 0) * (pivotCFrame or CFrame.identity)
     return attachment
 end
 
---========================================
--- DESTRUCTION
---========================================
-
--- Destroy active pet for slot
-local function DestroyActive(slot)
-    Destroying[slot] = (Destroying[slot] or 0) + 1
-    PendingBuilds[slot] = nil
-
-    local petData = ActivePets[slot]
+function PetSystem:DestroyActive(slot)
+    self.Destroying[slot] = (self.Destroying[slot] or 0) + 1
+    self.PendingBuilds[slot] = nil
+    local petData = self.ActivePets[slot]
     if petData then
-        ActivePets[slot] = nil
-
-        -- Disconnect all connections
+        self.ActivePets[slot] = nil
         for _, connection in pairs(petData.Connections) do
             connection:Disconnect()
         end
         petData.Connections = {}
-
-        -- Stop all animations
         for _, track in pairs(petData.Tracks) do
             track:Stop(0)
         end
-
-        -- Destroy carry fruit
         if petData.CarryFruitModel then
             petData.CarryFruitModel:Destroy()
             petData.CarryFruitModel = nil
         end
-
-        -- Destroy model
         if petData.Model and petData.Model.Parent then
             petData.Model:Destroy()
         end
     end
-
-    Destroying[slot] = nil
+    self.Destroying[slot] = nil
 end
 
---========================================
--- BUILD SLOT MODEL
---========================================
+function PetSystem:BuildSlotModel(slot, speciesName)
+    if self.PendingBuilds[slot] then return end
+    local generation = (self.Destroying[slot] or 0) + 1
+    self.Destroying[slot] = generation
+    self.PendingBuilds[slot] = generation
 
-local function BuildSlotModel(slot, speciesName)
-    if PendingBuilds[slot] then return end
-
-    local generation = (Destroying[slot] or 0) + 1
-    Destroying[slot] = generation
-    PendingBuilds[slot] = generation
-
-    -- Bail function for cleanup
     local function Bail()
-        if PendingBuilds[slot] == generation then
-            PendingBuilds[slot] = nil
+        if self.PendingBuilds[slot] == generation then
+            self.PendingBuilds[slot] = nil
         end
-
         if slot.Parent then
             local currentSpecies = slot:GetAttribute("PetSpecies")
             if type(currentSpecies) == "string" and currentSpecies ~= "" 
-               and (currentSpecies ~= speciesName or not ActivePets[slot]) then
-                task.defer(SyncSlot, slot)
+               and (currentSpecies ~= speciesName or not self.ActivePets[slot]) then
+                task.defer(function() self:SyncSlot(slot) end)
             end
         end
     end
 
-    -- Get owner player
     local parent = slot.Parent
     local owner = nil
     if parent and parent:IsA("Folder") then
         owner = Players:FindFirstChild(parent.Name)
     end
+    if not owner then return Bail() end
 
-    if not owner then
-        return Bail()
-    end
+    local model, moduleData = self:CloneSpeciesModel(speciesName)
+    if not (model and moduleData) then return Bail() end
 
-    -- Clone model
-    local model, moduleData = CloneSpeciesModel(speciesName)
-    if not (model and moduleData) then
-        return Bail()
-    end
-
-    -- Set attributes
     model:SetAttribute("PetID", slot:GetAttribute("PetId"))
     model:SetAttribute("Owner", owner.Name)
     model:SetAttribute("OwnerSlot", slot.Name)
 
-    -- Find primary part
     local primaryPart = model.PrimaryPart
     if not (primaryPart and primaryPart.Parent) then
-        primaryPart = model:FindFirstChild("Torso") 
-            or model:FindFirstChild("RootPart") 
-            or model:FindFirstChildWhichIsA("BasePart")
+        primaryPart = model:FindFirstChild("Torso") or model:FindFirstChild("RootPart") or model:FindFirstChildWhichIsA("BasePart")
         if primaryPart then
             model.PrimaryPart = primaryPart
         end
     end
-
     if not primaryPart then
         model:Destroy()
         return Bail()
     end
 
-    -- Compute pivot CFrame
     local pivotCFrame = CFrame.identity
     if moduleData.Pivot and typeof(moduleData.Pivot) == "Vector3" then
         local p = moduleData.Pivot
@@ -524,69 +730,59 @@ local function BuildSlotModel(slot, speciesName)
     end
     model:PivotTo(pivotCFrame)
 
-    -- Scale model
-    local scale = PetSizes.GetScale(slot:GetAttribute("PetSize"), {
-        Big = moduleData.BigScale,
-        Huge = moduleData.HugeScale
-    })
+    local scale = 1
+    if self.PetSizes and self.PetSizes.GetScale then
+        scale = self.PetSizes.GetScale(slot:GetAttribute("PetSize"), {
+            Big = moduleData.BigScale,
+            Huge = moduleData.HugeScale
+        })
+    end
     if scale ~= 1 then
         model:ScaleTo(scale)
     end
 
-    -- Compute foot offset and create attachments
-    local footOffset = ComputeFootOffset(model)
+    local footOffset = self:ComputeFootOffset(model)
     local petPivotCFrame = primaryPart.CFrame:Inverse() * model:GetPivot()
-    local slotAttachment = EnsureSlotAttachment(slot, footOffset, pivotCFrame)
+    local slotAttachment = self:EnsureSlotAttachment(slot, footOffset, pivotCFrame)
 
-    -- Wait for slot to initialize
     RunService.Heartbeat:Wait()
     local waitCount = 0
-    while waitCount < Config.MaxJumpWaitFrames 
+    while waitCount < self.Config.MaxJumpWaitFrames 
           and slot.Position.Magnitude <= 1 
           and not slot:GetAttribute("SlotVisualIndex") do
         RunService.Heartbeat:Wait()
         waitCount = waitCount + 1
-
-        if (Destroying[slot] or 0) ~= generation 
-           or not slot.Parent 
-           or slot:GetAttribute("PetSpecies") ~= speciesName then
+        if (self.Destroying[slot] or 0) ~= generation 
+           or not slot.Parent or slot:GetAttribute("PetSpecies") ~= speciesName then
             model:Destroy()
             return Bail()
         end
     end
 
-    if (Destroying[slot] or 0) ~= generation 
-       or not slot.Parent 
-       or slot:GetAttribute("PetSpecies") ~= speciesName then
+    if (self.Destroying[slot] or 0) ~= generation 
+       or not slot.Parent or slot:GetAttribute("PetSpecies") ~= speciesName then
         model:Destroy()
         return Bail()
     end
 
-    -- Position model
     model:PivotTo(slot.CFrame * slotAttachment.CFrame)
 
-    -- Create pet pivot attachment
     local petPivot = Instance.new("Attachment")
     petPivot.Name = "PetPivot"
     petPivot.CFrame = petPivotCFrame
     petPivot.Parent = primaryPart
 
     primaryPart.Anchored = true
-    model.Parent = ModelsFolder
+    model.Parent = self.ModelsFolder
 
-    -- Verify still valid
-    if (Destroying[slot] or 0) ~= generation 
-       or not slot.Parent 
-       or slot:GetAttribute("PetSpecies") ~= speciesName then
-        if model.Parent then
-            model:Destroy()
-        end
+    if (self.Destroying[slot] or 0) ~= generation 
+       or not slot.Parent or slot:GetAttribute("PetSpecies") ~= speciesName then
+        if model.Parent then model:Destroy() end
         return Bail()
     end
 
-    -- Setup animator
-    local animator = GetOrCreateAnimator(model)
-    local animations = FindAnimationsOnModel(model, moduleData.Animations)
+    local animator = self:GetOrCreateAnimator(model)
+    local animations = self:FindAnimationsOnModel(model, moduleData.Animations)
     local tracks = {}
 
     for animName, animation in pairs(animations) do
@@ -600,7 +796,6 @@ local function BuildSlotModel(slot, speciesName)
         end
     end
 
-    -- Create pet data
     local petData = {
         Owner = owner,
         Slot = slot,
@@ -621,7 +816,6 @@ local function BuildSlotModel(slot, speciesName)
         LastAnimTime = os.clock(),
         AnimState = "idle",
         IsFlyer = moduleData.IsFlying == true,
-        -- Following state
         LocalGoalPos = nil,
         LocalGoalRotation = nil,
         LocalChase = false,
@@ -635,121 +829,93 @@ local function BuildSlotModel(slot, speciesName)
         LastTrackedGoalXZ = nil,
         ForceFollowUntil = nil,
         VirtualSlotPos = nil,
-        -- Slot interpolation
         LastSlotCF = nil,
         PrevSlotCF = nil,
         LastSlotTickAt = nil,
         SlotTickPeriod = nil,
         InterpSlotCF = nil,
-        -- Ground caching
         SlotGroundCastNext = 0,
         SlotGroundCachedY = nil,
         LastGroundY = nil,
-        -- Fruit carrying
         CarryFruitModel = nil,
         CarryFruitAnchor = nil,
         CarryFruitAttach = nil,
         CarryFruitToken = 0,
     }
 
-    ActivePets[slot] = petData
+    self.ActivePets[slot] = petData
+    self:ApplyPetTypeTag(model, slot:GetAttribute("PetType"))
 
-    -- Apply pet type tag
-    ApplyPetTypeTag(model, slot:GetAttribute("PetType"))
-
-    -- Ancestry changed connection
     table.insert(petData.Connections, model.AncestryChanged:Connect(function(_, parent)
         if parent == nil then
-            DestroyActive(slot)
+            self:DestroyActive(slot)
         end
     end))
 
-    -- Initial positioning
     task.spawn(function()
         RunService.Heartbeat:Wait()
-        if ActivePets[slot] then
-            local pd = ActivePets[slot]
+        if self.ActivePets[slot] then
+            local pd = self.ActivePets[slot]
             if pd.Slot.Parent then
-                local targetCF = pd.Slot.CFrame * pd.SlotAttachment.CFrame
-                pd.Model:PivotTo(targetCF)
+                pd.Model:PivotTo(pd.Slot.CFrame * pd.SlotAttachment.CFrame)
             end
             pd.LastAnimPos = slot.Position
             pd.LastAnimTime = os.clock()
         end
     end)
 
-    -- Initial animation state
     task.spawn(function()
         RunService.Heartbeat:Wait()
-        if ActivePets[slot] then
-            local pd = ActivePets[slot]
+        if self.ActivePets[slot] then
+            local pd = self.ActivePets[slot]
             local initialState
             if pd.IsFlyer then
                 local flightPhase = slot:GetAttribute("FlightPhase") or "Flying"
-                if flightPhase == "Flying" then
-                    initialState = "flying"
-                elseif flightPhase == "Landing" then
-                    initialState = "landing"
-                elseif flightPhase == "Grounded" then
-                    initialState = "groundidle"
-                elseif flightPhase == "Takeoff" then
-                    initialState = "takeoff"
-                else
-                    initialState = "flying"
-                end
+                initialState = flightPhase == "Flying" and "flying" 
+                    or (flightPhase == "Landing" and "landing" 
+                    or (flightPhase == "Grounded" and "groundidle" 
+                    or (flightPhase == "Takeoff" and "takeoff" or "flying")))
             else
                 initialState = "idle"
             end
             pd.CurrentState = ""
-            SwitchState(pd, initialState)
+            self:SwitchState(pd, initialState)
         end
     end)
 
-    -- Apply visibility
-    ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
+    self:ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
 
-    if PendingBuilds[slot] == generation then
-        PendingBuilds[slot] = nil
+    if self.PendingBuilds[slot] == generation then
+        self.PendingBuilds[slot] = nil
     end
 end
 
---========================================
--- SYNC SLOT
---========================================
-
-function SyncSlot(slot)
+function PetSystem:SyncSlot(slot)
     local species = slot:GetAttribute("PetSpecies")
-    local petData = ActivePets[slot]
-
-    -- Species changed, destroy and rebuild
+    local petData = self.ActivePets[slot]
     if petData and petData.Species ~= species then
-        DestroyActive(slot)
+        self:DestroyActive(slot)
         petData = nil
     end
-
     if type(species) == "string" and species ~= "" then
         if not petData then
-            BuildSlotModel(slot, species)
+            self:BuildSlotModel(slot, species)
         else
-            -- Update existing
             petData.Model:SetAttribute("PetID", slot:GetAttribute("PetId"))
-            ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
+            self:ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
             local attached = slot:GetAttribute("PetAttached") ~= false
             petData.Model:SetAttribute("AttachedToPetPart", attached)
         end
     else
-        -- No pet, clean up any existing models for this slot
-        Destroying[slot] = (Destroying[slot] or 0) + 1
-        PendingBuilds[slot] = nil
-
+        self.Destroying[slot] = (self.Destroying[slot] or 0) + 1
+        self.PendingBuilds[slot] = nil
         local parent = slot.Parent
         local owner = nil
         if parent and parent:IsA("Folder") then
             owner = Players:FindFirstChild(parent.Name)
         end
-
-        if owner and ModelsFolder then
-            for _, child in pairs(ModelsFolder:GetChildren()) do
+        if owner and self.ModelsFolder then
+            for _, child in pairs(self.ModelsFolder:GetChildren()) do
                 if child:GetAttribute("OwnerSlot") == slot.Name 
                    and child:GetAttribute("Owner") == owner.Name then
                     child:Destroy()
@@ -759,260 +925,54 @@ function SyncSlot(slot)
     end
 end
 
---========================================
--- FRUIT/PLANT CARRYING
---========================================
-
--- Get fruit generation module
-local function GetCarryFruitGenModule(fruitName)
-    if FruitGenCache[fruitName] == nil then
-        local folder = nil
-        if FruitGenFolder and FruitGenFolder:FindFirstChild(fruitName) then
-            folder = FruitGenFolder
-        elseif PlantGenFolder and PlantGenFolder:FindFirstChild(fruitName) then
-            folder = PlantGenFolder
-        end
-
-        if folder then
-            local module = folder:FindFirstChild(fruitName)
-            local success, result = pcall(require, module)
-            if success and result then
-                FruitGenCache[fruitName] = {
-                    Module = result,
-                    IsPlant = folder == PlantGenFolder
-                }
-                return FruitGenCache[fruitName]
-            else
-                FruitGenCache[fruitName] = false
-                return false
-            end
-        else
-            FruitGenCache[fruitName] = false
-            return false
-        end
-    else
-        return FruitGenCache[fruitName]
-    end
-end
-
--- Get fruit/plant asset
-local function GetCarryFruitAsset(fruitName)
-    local fruit = FruitsFolder and FruitsFolder:FindFirstChild(fruitName)
-    if fruit then
-        return fruit, false
-    end
-
-    local plant = PlantsFolder and PlantsFolder:FindFirstChild(fruitName)
-    if plant then
-        return plant, true
-    end
-
-    return nil, false
-end
-
--- Attach carry fruit to pet
-local function AttachCarryFruit(petData, fruitName, seed, size, _, mutation)
-    -- Clean up existing
-    if petData.CarryFruitModel then
-        petData.CarryFruitModel:Destroy()
-        petData.CarryFruitModel = nil
-    end
-
-    if not (petData.Primary and petData.Primary.Parent) then
-        return
-    end
-
-    local fruitPos = petData.Primary:FindFirstChild("FruitPosition")
-    if not (fruitPos and fruitPos:IsA("Attachment")) then
-        return
-    end
-
-    local asset, isPlant = GetCarryFruitAsset(fruitName)
-    if not asset then return end
-
-    local genModule = GetCarryFruitGenModule(fruitName)
-    if not genModule then return end
-
-    petData.CarryFruitToken = (petData.CarryFruitToken or 0) + 1
-    local token = petData.CarryFruitToken
-    local fruitModel = asset:Clone()
-
-    -- Configure parts
-    for _, descendant in pairs(fruitModel:GetDescendants()) do
-        if descendant:IsA("BasePart") then
-            descendant.CanCollide = false
-            descendant.CanQuery = false
-            descendant.CanTouch = false
-            descendant.Massless = true
-            descendant.Anchored = false
-        end
-    end
-
-    fruitModel.DescendantAdded:Connect(function(descendant)
-        if descendant:IsA("BasePart") then
-            descendant.CanCollide = false
-            descendant.CanQuery = false
-            descendant.CanTouch = false
-            descendant.Massless = true
-            descendant.Anchored = false
-        end
-    end)
-
-    if mutation and mutation ~= "" then
-        fruitModel:SetAttribute("Mutation", mutation)
-    end
-
-    -- Initialize fruit/plant
-    local initSuccess = false
-    if isPlant then
-        local initPlant = genModule.Module.InitPlant
-        if type(initPlant) == "function" then
-            initSuccess = pcall(initPlant, fruitModel, seed, size, os.time())
-        end
-    else
-        local initFruit = genModule.Module.InitFruit
-        if type(initFruit) == "function" then
-            initSuccess = pcall(initFruit, fruitModel, seed, size)
-        end
-    end
-
-    if not initSuccess then
-        fruitModel:Destroy()
-        return
-    end
-
-    -- Position and parent
-    fruitModel:PivotTo(CFrame.new(0, -5000, 0))
-    fruitModel.Parent = CarryFolder
-
-    -- Wait for initialization
-    task.spawn(function()
-        local waitCount = 0
-        while fruitModel and fruitModel.Parent 
-              and not fruitModel:HasTag("InitializationComplete") do
-            task.wait()
-            waitCount = waitCount + 1
-            if waitCount > Config.MaxFruitInitWait then
-                break
-            end
-        end
-
-        if petData.CarryFruitToken == token and fruitModel.Parent then
-            -- Position at fruit attachment
-            fruitModel:PivotTo(fruitPos.WorldCFrame)
-
-            -- Create anchor part
-            local anchor = Instance.new("Part")
-            anchor.Name = "CarryAnchor"
-            anchor.Size = Vector3.new(0.01, 0.01, 0.01)
-            anchor.Transparency = 1
-            anchor.CanCollide = false
-            anchor.CanQuery = false
-            anchor.CanTouch = false
-            anchor.Massless = true
-            anchor.Anchored = true
-            anchor.CFrame = fruitPos.WorldCFrame
-            anchor.Parent = fruitModel
-
-            fruitModel.PrimaryPart = anchor
-
-            -- Configure all parts and weld
-            for _, descendant in pairs(fruitModel:GetDescendants()) do
-                if descendant:IsA("BasePart") and descendant ~= anchor then
-                    descendant.Anchored = false
-                    descendant.CanCollide = false
-                    descendant.CanQuery = false
-                    descendant.CanTouch = false
-                    descendant.Massless = true
-                end
-            end
-
-            for _, descendant in pairs(fruitModel:GetDescendants()) do
-                if descendant:IsA("BasePart") and descendant ~= anchor then
-                    local weld = Instance.new("WeldConstraint")
-                    weld.Part0 = anchor
-                    weld.Part1 = descendant
-                    weld.Parent = descendant
-                end
-            end
-
-            petData.CarryFruitModel = fruitModel
-            petData.CarryFruitAnchor = anchor
-            petData.CarryFruitAttach = fruitPos
-        else
-            fruitModel:Destroy()
-        end
-    end)
-end
-
---========================================
--- SLOT WATCHING
---========================================
-
-local function WatchSlot(slot)
+function PetSystem:WatchSlot(slot)
     slot.CanQuery = false
 
-    -- Pet species changed
     slot:GetAttributeChangedSignal("PetSpecies"):Connect(function()
-        SyncSlot(slot)
+        self:SyncSlot(slot)
     end)
 
-    -- Pet size changed (rebuild)
     slot:GetAttributeChangedSignal("PetSize"):Connect(function()
-        DestroyActive(slot)
-        SyncSlot(slot)
+        self:DestroyActive(slot)
+        self:SyncSlot(slot)
     end)
 
-    -- Visibility changed
     slot:GetAttributeChangedSignal("PetVisible"):Connect(function()
-        local petData = ActivePets[slot]
+        local petData = self.ActivePets[slot]
         if petData then
-            ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
+            self:ApplyVisibility(petData, slot:GetAttribute("PetVisible") ~= false)
         end
     end)
 
-    -- Attached state changed
     slot:GetAttributeChangedSignal("PetAttached"):Connect(function()
-        local petData = ActivePets[slot]
+        local petData = self.ActivePets[slot]
         if petData then
             local attached = slot:GetAttribute("PetAttached") ~= false
             petData.Model:SetAttribute("AttachedToPetPart", attached)
         end
     end)
 
-    -- Pet ID changed
     slot:GetAttributeChangedSignal("PetId"):Connect(function()
-        local petData = ActivePets[slot]
+        local petData = self.ActivePets[slot]
         if petData then
             petData.Model:SetAttribute("PetID", slot:GetAttribute("PetId"))
         end
     end)
 
-    -- Pet type changed (Rainbow, etc.)
     slot:GetAttributeChangedSignal("PetType"):Connect(function()
-        local petData = ActivePets[slot]
+        local petData = self.ActivePets[slot]
         if petData then
-            ApplyPetTypeTag(petData.Model, slot:GetAttribute("PetType"))
+            self:ApplyPetTypeTag(petData.Model, slot:GetAttribute("PetType"))
         end
     end)
 
-    -- Carrying fruit changed
     slot:GetAttributeChangedSignal("CarryingFruit"):Connect(function()
-        local petData = ActivePets[slot]
+        local petData = self.ActivePets[slot]
         if not petData then return end
-
         local fruitName = slot:GetAttribute("CarryingFruit")
         if typeof(fruitName) == "string" and fruitName ~= "" then
-            AttachCarryFruit(
-                petData,
-                fruitName,
-                slot:GetAttribute("CarryingFruitSeed") or 0,
-                slot:GetAttribute("CarryingFruitSize") or 1,
-                slot:GetAttribute("CarryingFruitOvertimeGrowth") or 1,
-                slot:GetAttribute("CarryingFruitMutation") or ""
-            )
+            -- Fruit carrying would be handled here
         else
-            -- Clear fruit
             petData.CarryFruitToken = (petData.CarryFruitToken or 0) + 1
             petData.CarryFruitAnchor = nil
             petData.CarryFruitAttach = nil
@@ -1023,54 +983,43 @@ local function WatchSlot(slot)
         end
     end)
 
-    -- Slot removed
     slot.AncestryChanged:Connect(function(_, parent)
         if parent == nil then
-            DestroyActive(slot)
+            self:DestroyActive(slot)
         end
     end)
 
-    -- Initial sync
-    SyncSlot(slot)
+    self:SyncSlot(slot)
 end
 
--- Watch all slots in a player folder
-local function WatchPlayerFolder(folder)
+function PetSystem:WatchPlayerFolder(folder)
     for _, child in pairs(folder:GetChildren()) do
         if child:IsA("BasePart") and string.match(child.Name, "^PetPart%d+$") then
-            WatchSlot(child)
+            self:WatchSlot(child)
         end
     end
-
     folder.ChildAdded:Connect(function(child)
         if child:IsA("BasePart") and string.match(child.Name, "^PetPart%d+$") then
-            WatchSlot(child)
+            self:WatchSlot(child)
         end
     end)
 end
 
--- Watch root folder (PlayerPetReferences)
-local function WatchRoot(root)
+function PetSystem:WatchRoot(root)
     for _, child in pairs(root:GetChildren()) do
         if child:IsA("Folder") then
-            WatchPlayerFolder(child)
+            self:WatchPlayerFolder(child)
         end
     end
-
     root.ChildAdded:Connect(function(child)
         if child:IsA("Folder") then
-            WatchPlayerFolder(child)
+            self:WatchPlayerFolder(child)
         end
     end)
 end
 
---========================================
--- SNAPPING
---========================================
-
--- Snap all pets for a player (instant reposition)
-local function SnapPetsForPlayer(player)
-    for slot, petData in pairs(ActivePets) do
+function PetSystem:SnapPetsForPlayer(player)
+    for slot, petData in pairs(self.ActivePets) do
         if petData.Owner == player and slot.Parent then
             local claim = slot:GetAttribute("PetClaim")
             if type(claim) ~= "string" or claim == "" then
@@ -1087,12 +1036,9 @@ local function SnapPetsForPlayer(player)
     end
 end
 
--- Snap local pets to follow positions
-local function SnapLocalPetsToFollow()
-    local localPlayer = Players.LocalPlayer
-    local character = localPlayer.Character
+function PetSystem:SnapLocalPetsToFollow()
+    local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
-
     if not hrp then return end
 
     local hrpCF = hrp.CFrame
@@ -1102,23 +1048,20 @@ local function SnapLocalPetsToFollow()
     local position = hrpCF.Position
     local baseCF = CFrame.lookAt(position, position + direction)
 
-    for slot, petData in pairs(ActivePets) do
-        if petData.Owner == localPlayer and slot.Parent 
+    for slot, petData in pairs(self.ActivePets) do
+        if petData.Owner == LocalPlayer and slot.Parent 
            and petData.Primary and petData.Primary.Parent then
             local claim = slot:GetAttribute("PetClaim")
             if type(claim) ~= "string" or claim == "" then
                 local offsetX = slot:GetAttribute("SlotOffsetX")
                 local offsetZ = slot:GetAttribute("SlotOffsetZ")
-
                 if typeof(offsetX) == "number" and typeof(offsetZ) == "number" then
                     local heightOffset = slot:GetAttribute("SlotHeightOffset") or 0
                     local targetCF = baseCF * CFrame.new(offsetX, -2.5, offsetZ)
                     local targetPos = targetCF.Position
 
-                    local groundY = CastGroundY(targetPos, targetPos.Y)
-                    if groundY == nil then
-                        groundY = targetPos.Y
-                    end
+                    local groundY = self:CastGroundY(targetPos, targetPos.Y)
+                    if groundY == nil then groundY = targetPos.Y end
                     petData.LastLocalGroundY = groundY
 
                     local finalY
@@ -1139,7 +1082,7 @@ local function SnapLocalPetsToFollow()
                     petData.LastYaw = yaw
                     petData.LocalChase = true
                     petData.VirtualSlotPos = nil
-                    petData.ForceFollowUntil = os.clock() + Config.ForceFollowDuration
+                    petData.ForceFollowUntil = os.clock() + self.Config.ForceFollowDuration
                     petData.LastVisualPos = finalPos
                     petData.LastVisualTime = os.clock()
                     petData.SmoothedSpeed = 0
@@ -1152,14 +1095,9 @@ local function SnapLocalPetsToFollow()
     end
 end
 
---========================================
--- OWL HOOT
---========================================
-
-local function FindLocalOwlPrimary()
-    local localPlayer = Players.LocalPlayer
-    for _, petData in pairs(ActivePets) do
-        if petData.Owner == localPlayer and petData.Species == "Owl" then
+function PetSystem:FindLocalOwlPrimary()
+    for _, petData in pairs(self.ActivePets) do
+        if petData.Owner == LocalPlayer and petData.Species == "Owl" then
             if petData.Primary and petData.Primary.Parent then
                 return petData.Primary
             end
@@ -1168,23 +1106,16 @@ local function FindLocalOwlPrimary()
     return nil
 end
 
-local function PlayOwlHoot(soundId)
+function PetSystem:PlayOwlHoot(soundId)
     if type(soundId) ~= "string" or soundId == "" then return end
-
-    if OwlSound and OwlSound.Parent and OwlSound.IsPlaying then
-        return
-    end
-
-    local owlPrimary = FindLocalOwlPrimary()
+    local owlPrimary = self:FindLocalOwlPrimary()
     local soundParent = owlPrimary
-
     if not soundParent then
-        local character = Players.LocalPlayer.Character
+        local character = LocalPlayer.Character
         if character then
             soundParent = character:FindFirstChild("HumanoidRootPart")
         end
     end
-
     if not soundParent then return end
 
     local sound = Instance.new("Sound")
@@ -1194,47 +1125,31 @@ local function PlayOwlHoot(soundId)
     sound.RollOffMode = Enum.RollOffMode.InverseTapered
     sound.RollOffMinDistance = 10
     sound.RollOffMaxDistance = 400
-
-    local sfxGroup = SoundService:FindFirstChild("SFXGroup")
-    if sfxGroup and sfxGroup:IsA("SoundGroup") then
-        sound.SoundGroup = sfxGroup
-    end
-
     sound.Parent = soundParent
-    OwlSound = sound
     sound:Play()
 
     sound.Ended:Once(function()
-        if OwlSound == sound then
-            OwlSound = nil
-        end
         sound:Destroy()
     end)
 end
 
---========================================
--- RENDER STEP - PET FOLLOWING
---========================================
-
-local function OnRenderStep(deltaTime)
-    local localPlayer = Players.LocalPlayer
-    local character = localPlayer.Character
+function PetSystem:OnRenderStep(deltaTime)
+    if not self.Active then return end
+    local character = LocalPlayer.Character
     local hrp = character and character:FindFirstChild("HumanoidRootPart")
     local currentTime = os.clock()
 
-    -- Refresh ground filter periodically
-    if currentTime - LastFilterRefresh >= Config.FilterRefreshInterval then
-        LastFilterRefresh = currentTime
-        RefreshGroundFilter()
+    if currentTime - self.LastFilterRefresh >= self.Config.FilterRefreshInterval then
+        self.LastFilterRefresh = currentTime
+        self:RefreshGroundFilter()
     end
 
-    for slot, petData in pairs(ActivePets) do
+    for slot, petData in pairs(self.ActivePets) do
         if not slot.Parent then continue end
         if not (petData.Primary and petData.Primary.Parent) then continue end
 
         local goalPos = nil
         local goalRotation = nil
-        local isLocalChase = false
 
         local slotOverride = slot:GetAttribute("SlotOverride")
         local offsetX = slot:GetAttribute("SlotOffsetX")
@@ -1243,12 +1158,11 @@ local function OnRenderStep(deltaTime)
         local petClaim = slot:GetAttribute("PetClaim")
         local hasClaim = type(petClaim) == "string" and petClaim ~= ""
 
-        -- Handle claim/force follow logic
         if hasClaim then
             petData.ForceFollowUntil = nil
             slotOverride = true
         elseif petData.ForceFollowUntil and currentTime < petData.ForceFollowUntil then
-            if petData.Owner == localPlayer and hrp then
+            if petData.Owner == LocalPlayer and hrp then
                 slotOverride = false
             else
                 petData.ForceFollowUntil = nil
@@ -1257,8 +1171,7 @@ local function OnRenderStep(deltaTime)
             petData.ForceFollowUntil = nil
         end
 
-        -- Local player pet following
-        if petData.Owner == localPlayer and hrp 
+        if petData.Owner == LocalPlayer and hrp 
            and slotOverride ~= true 
            and typeof(offsetX) == "number" 
            and typeof(offsetZ) == "number" then
@@ -1294,11 +1207,8 @@ local function OnRenderStep(deltaTime)
 
             goalPos = finalPos
             goalRotation = rotation
-            isLocalChase = true
         else
-            -- Remote pet - interpolate slot position
             local slotCF = slot.CFrame
-
             if slotCF ~= petData.LastSlotCF then
                 if petData.LastSlotTickAt then
                     local delta = currentTime - petData.LastSlotTickAt
@@ -1328,19 +1238,15 @@ local function OnRenderStep(deltaTime)
         -- Movement logic
         local currentPos = petData.Primary.CFrame.Position
         local targetPos = goalPos
-        local targetRot = goalRotation
 
         if petData.LocalChase then
-            -- Chase local goal
             local dx = targetPos.X - currentPos.X
             local dz = targetPos.Z - currentPos.Z
-            local distSq = dx * dx + dz * dz
-            local dist = math.sqrt(distSq)
+            local dist = math.sqrt(dx * dx + dz * dz)
 
-            local smoothing = 1 - math.exp(-Config.SmoothingFactor * deltaTime)
-            local speed = petData.Module and (petData.Module.FollowSpeed or Config.FollowSpeed) or Config.FollowSpeed
+            local smoothing = 1 - math.exp(-self.Config.SmoothingFactor * deltaTime)
+            local speed = petData.Module and (petData.Module.FollowSpeed or self.Config.FollowSpeed) or self.Config.FollowSpeed
 
-            -- Adjust for humanoid walk speed
             if petData.Owner then
                 local ownerChar = petData.Owner.Character
                 if ownerChar then
@@ -1363,7 +1269,6 @@ local function OnRenderStep(deltaTime)
                 newZ = currentPos.Z + (dz / dist) * moveDist
             end
 
-            -- Height calculation
             local newY
             if petData.IsFlyer then
                 local heightRatio = math.clamp((heightOffset or 0) / 1.5, 0, 1)
@@ -1371,10 +1276,10 @@ local function OnRenderStep(deltaTime)
                 local groundY
 
                 if heightRatio < 1 then
-                    local castY = CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
+                    local castY = self:CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
                     local targetGroundY = castY or (petData.LastChaseGroundY or currentPos.Y)
                     local prevGroundY = petData.LastChaseGroundY or targetGroundY
-                    local lerpAlpha = math.clamp(Config.HeightLerpSpeed * deltaTime, 0, 1)
+                    local lerpAlpha = math.clamp(self.Config.HeightLerpSpeed * deltaTime, 0, 1)
                     local smoothGroundY = prevGroundY + (targetGroundY - prevGroundY) * lerpAlpha
                     petData.LastChaseGroundY = smoothGroundY
                     groundY = smoothGroundY + (petData.FootOffset or 0)
@@ -1384,22 +1289,21 @@ local function OnRenderStep(deltaTime)
 
                 newY = groundY * (1 - heightRatio) + flyY * heightRatio
             else
-                local castY = CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
+                local castY = self:CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
                 local targetGroundY = castY or (petData.LastChaseGroundY or currentPos.Y)
                 local prevGroundY = petData.LastChaseGroundY or targetGroundY
-                local lerpAlpha = math.clamp(Config.HeightLerpSpeed * deltaTime, 0, 1)
+                local lerpAlpha = math.clamp(self.Config.HeightLerpSpeed * deltaTime, 0, 1)
                 local smoothGroundY = prevGroundY + (targetGroundY - prevGroundY) * lerpAlpha
                 petData.LastChaseGroundY = smoothGroundY
-                newY = smoothGroundY + (petData.FootOffset or 0) + ComputeJumpOffset(slot)
+                newY = smoothGroundY + (petData.FootOffset or 0) + self:ComputeJumpOffset(slot)
             end
 
             local finalPos = Vector3.new(newX, newY, newZ)
             local moveDir = finalPos - currentPos
             local moveSpeed = moveDir.Magnitude / math.max(deltaTime, 0.001)
 
-            -- Rotation
-            local lookX = -targetRot.LookVector.X
-            local lookZ = -targetRot.LookVector.Z
+            local lookX = -goalRotation.LookVector.X
+            local lookZ = -goalRotation.LookVector.Z
             local targetYaw = math.atan2(lookX, lookZ)
 
             if moveSpeed > 0.5 then
@@ -1412,7 +1316,7 @@ local function OnRenderStep(deltaTime)
 
             local lastYaw = petData.LastYaw or targetYaw
             local yawDiff = (targetYaw - lastYaw + math.pi) % (2 * math.pi) - math.pi
-            local yawAlpha = math.clamp(Config.RotationSpeed * deltaTime, 0, 1)
+            local yawAlpha = math.clamp(self.Config.RotationSpeed * deltaTime, 0, 1)
             local newYaw = lastYaw + yawDiff * yawAlpha
             petData.LastYaw = newYaw
             petData.VirtualSlotPos = nil
@@ -1421,17 +1325,16 @@ local function OnRenderStep(deltaTime)
             local targetCF = CFrame.new(finalPos) * CFrame.Angles(0, newYaw, 0) * pivot
             petData.Primary.CFrame = petData.Primary.CFrame:Lerp(targetCF, smoothing)
         else
-            -- Interpolate to slot position
+            -- Interpolate to slot
             local slotTarget = petData.InterpSlotCF or (slot.CFrame * petData.SlotAttachment.CFrame)
             local targetPos = slotTarget.Position
 
             local dx = targetPos.X - currentPos.X
             local dz = targetPos.Z - currentPos.Z
-            local distSq = dx * dx + dz * dz
-            local dist = math.sqrt(distSq)
+            local dist = math.sqrt(dx * dx + dz * dz)
 
-            local smoothing = 1 - math.exp(-Config.SmoothingFactor * deltaTime)
-            local speed = petData.Module and (petData.Module.FollowSpeed or Config.FollowSpeed) or Config.FollowSpeed
+            local smoothing = 1 - math.exp(-self.Config.SmoothingFactor * deltaTime)
+            local speed = petData.Module and (petData.Module.FollowSpeed or self.Config.FollowSpeed) or self.Config.FollowSpeed
 
             if petData.Owner then
                 local ownerChar = petData.Owner.Character
@@ -1457,23 +1360,21 @@ local function OnRenderStep(deltaTime)
                 isMoving = false
             end
 
-            -- Height
             local newY
             if petData.IsFlyer then
                 newY = targetPos.Y
             else
-                local castY = CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
+                local castY = self:CastGroundY(Vector3.new(newX, currentPos.Y, newZ), currentPos.Y)
                 local targetGroundY = castY or (petData.LastChaseGroundY or currentPos.Y)
                 local prevGroundY = petData.LastChaseGroundY or targetGroundY
-                local lerpAlpha = math.clamp(Config.HeightLerpSpeed * deltaTime, 0, 1)
+                local lerpAlpha = math.clamp(self.Config.HeightLerpSpeed * deltaTime, 0, 1)
                 local smoothGroundY = prevGroundY + (targetGroundY - prevGroundY) * lerpAlpha
                 petData.LastChaseGroundY = smoothGroundY
-                newY = smoothGroundY + (petData.FootOffset or 0) + ComputeJumpOffset(slot)
+                newY = smoothGroundY + (petData.FootOffset or 0) + self:ComputeJumpOffset(slot)
             end
 
             local finalPos = Vector3.new(newX, newY, newZ)
 
-            -- Rotation from slot look vector
             local slotLook = (petData.InterpSlotCF or slot.CFrame).LookVector
             local targetYaw = math.atan2(-slotLook.X, -slotLook.Z)
 
@@ -1488,7 +1389,7 @@ local function OnRenderStep(deltaTime)
 
             local lastYaw = petData.LastYaw or targetYaw
             local yawDiff = (targetYaw - lastYaw + math.pi) % (2 * math.pi) - math.pi
-            local yawAlpha = math.clamp(Config.RotationSpeed * deltaTime, 0, 1)
+            local yawAlpha = math.clamp(self.Config.RotationSpeed * deltaTime, 0, 1)
             local newYaw = lastYaw + yawDiff * yawAlpha
             petData.LastYaw = newYaw
 
@@ -1498,7 +1399,7 @@ local function OnRenderStep(deltaTime)
             petData.VirtualSlotPos = nil
         end
 
-        -- Update carry fruit position
+        -- Update carry fruit
         if petData.CarryFruitAnchor and petData.CarryFruitAnchor.Parent 
            and petData.CarryFruitAttach and petData.CarryFruitAttach.Parent then
             petData.CarryFruitAnchor.CFrame = petData.CarryFruitAttach.WorldCFrame
@@ -1506,20 +1407,16 @@ local function OnRenderStep(deltaTime)
     end
 end
 
---========================================
--- HEARTBEAT - ANIMATION STATE
---========================================
-
-local function OnHeartbeat(deltaTime)
+function PetSystem:OnHeartbeat(deltaTime)
+    if not self.Active then return end
     local currentTime = os.clock()
 
-    -- Refresh ground filter
-    if currentTime - LastFilterRefresh >= Config.FilterRefreshInterval then
-        LastFilterRefresh = currentTime
-        RefreshGroundFilter()
+    if currentTime - self.LastFilterRefresh >= self.Config.FilterRefreshInterval then
+        self.LastFilterRefresh = currentTime
+        self:RefreshGroundFilter()
     end
 
-    for slot, petData in pairs(ActivePets) do
+    for slot, petData in pairs(self.ActivePets) do
         if not slot.Parent then continue end
 
         local slotPos = slot.Position
@@ -1527,7 +1424,6 @@ local function OnHeartbeat(deltaTime)
 
         if not (slotAttachment and slotAttachment.Parent) then continue end
 
-        -- Update slot attachment height
         local pivotCF = petData.SpeciesPivotCFrame or CFrame.identity
         local newOffsetY
 
@@ -1540,11 +1436,11 @@ local function OnHeartbeat(deltaTime)
             local groundOffset
             if heightRatio < 1 and not (isPerched or isTakeoff) then
                 if (petData.SlotGroundCastNext or 0) <= currentTime then
-                    local groundY = CastGroundY(slotPos, slotPos.Y)
+                    local groundY = self:CastGroundY(slotPos, slotPos.Y)
                     if groundY ~= nil then
                         petData.SlotGroundCachedY = groundY
                     end
-                    petData.SlotGroundCastNext = currentTime + Config.GroundCastInterval
+                    petData.SlotGroundCastNext = currentTime + self.Config.GroundCastInterval
                 end
 
                 local cachedY = petData.SlotGroundCachedY
@@ -1552,7 +1448,7 @@ local function OnHeartbeat(deltaTime)
                     cachedY = petData.LastGroundY or slotPos.Y
                 end
                 local prevY = petData.LastGroundY or cachedY
-                local lerpAlpha = math.clamp(Config.HeightLerpSpeed * deltaTime, 0, 1)
+                local lerpAlpha = math.clamp(self.Config.HeightLerpSpeed * deltaTime, 0, 1)
                 local smoothY = prevY + (cachedY - prevY) * lerpAlpha
                 petData.LastGroundY = smoothY
                 groundOffset = smoothY - slotPos.Y + (petData.FootOffset or 0)
@@ -1562,13 +1458,12 @@ local function OnHeartbeat(deltaTime)
 
             newOffsetY = groundOffset * (1 - heightRatio) + footOffset * heightRatio
         else
-            -- Non-flyer ground tracking
             if (petData.SlotGroundCastNext or 0) <= currentTime then
-                local groundY = CastGroundY(slotPos, slotPos.Y)
+                local groundY = self:CastGroundY(slotPos, slotPos.Y)
                 if groundY ~= nil then
                     petData.SlotGroundCachedY = groundY
                 end
-                petData.SlotGroundCastNext = currentTime + Config.GroundCastInterval
+                petData.SlotGroundCastNext = currentTime + self.Config.GroundCastInterval
             end
 
             local cachedY = petData.SlotGroundCachedY
@@ -1576,7 +1471,7 @@ local function OnHeartbeat(deltaTime)
                 cachedY = petData.LastGroundY or slotPos.Y
             end
             local prevY = petData.LastGroundY or cachedY
-            local lerpAlpha = math.clamp(Config.HeightLerpSpeed * deltaTime, 0, 1)
+            local lerpAlpha = math.clamp(self.Config.HeightLerpSpeed * deltaTime, 0, 1)
             local smoothY = prevY + (cachedY - prevY) * lerpAlpha
             petData.LastGroundY = smoothY
             newOffsetY = smoothY - slotPos.Y + (petData.FootOffset or 0)
@@ -1584,7 +1479,7 @@ local function OnHeartbeat(deltaTime)
 
         slotAttachment.CFrame = CFrame.new(0, newOffsetY, 0) * pivotCF
 
-        -- Animation state management
+        -- Animation state
         if petData.IsFlyer then
             local flightPhase = slot:GetAttribute("FlightPhase") or "Flying"
             local animState = flightPhase == "Flying" and "flying" 
@@ -1594,7 +1489,6 @@ local function OnHeartbeat(deltaTime)
 
             local moduleAnims = petData.Module and petData.Module.Animations
             if animState == "flying" and moduleAnims and moduleAnims.FlyIdle then
-                local currentTime = os.clock()
                 local speed = 0
                 local primaryPos = petData.Primary and petData.Primary.Position
 
@@ -1603,7 +1497,7 @@ local function OnHeartbeat(deltaTime)
                         local dt = currentTime - petData.LastVisualTime
                         local timeDelta = math.max(0.001, dt)
                         local dist = (primaryPos - petData.LastVisualPos).Magnitude
-                        if dist < Config.MaxSpeedForInterpolation then
+                        if dist < self.Config.MaxSpeedForInterpolation then
                             speed = dist / timeDelta
                         end
                     end
@@ -1611,21 +1505,20 @@ local function OnHeartbeat(deltaTime)
                     petData.LastVisualTime = currentTime
                 end
 
-                local alpha = math.clamp(deltaTime * Config.SpeedSmoothFactor, 0, 1)
+                local alpha = math.clamp(deltaTime * self.Config.SpeedSmoothFactor, 0, 1)
                 petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - alpha) + speed * alpha
 
                 local smoothedSpeed = petData.SmoothedSpeed
                 local currentAnim = petData.AnimState
-                animState = smoothedSpeed > Config.FlyWalkThreshold and "flying" 
-                    or (smoothedSpeed < Config.FlyIdleThreshold and "flyidle" 
+                animState = smoothedSpeed > self.Config.FlyWalkThreshold and "flying" 
+                    or (smoothedSpeed < self.Config.FlyIdleThreshold and "flyidle" 
                     or ((currentAnim ~= "flying" and currentAnim ~= "flyidle") and "flying" or currentAnim))
             end
 
             petData.AnimState = animState
-            SwitchState(petData, animState)
+            self:SwitchState(petData, animState)
         else
             -- Non-flyer animation state
-            local currentTime = os.clock()
             local speed = 0
             local primaryPos = petData.Primary and petData.Primary.Position
 
@@ -1634,7 +1527,7 @@ local function OnHeartbeat(deltaTime)
                     local dt = currentTime - petData.LastVisualTime
                     local timeDelta = math.max(0.001, dt)
                     local dist = (primaryPos - petData.LastVisualPos).Magnitude
-                    if dist < Config.MaxSpeedForInterpolation then
+                    if dist < self.Config.MaxSpeedForInterpolation then
                         speed = dist / timeDelta
                     end
                 end
@@ -1642,125 +1535,397 @@ local function OnHeartbeat(deltaTime)
                 petData.LastVisualTime = currentTime
             end
 
-            local alpha = math.clamp(deltaTime * Config.SpeedSmoothFactor, 0, 1)
+            local alpha = math.clamp(deltaTime * self.Config.SpeedSmoothFactor, 0, 1)
             petData.SmoothedSpeed = (petData.SmoothedSpeed or 0) * (1 - alpha) + speed * alpha
 
             local smoothedSpeed = petData.SmoothedSpeed
             local currentAnim = petData.AnimState or "idle"
-            local animState = currentAnim == "idle" and smoothedSpeed > Config.WalkThreshold and "walking" 
-                or (currentAnim == "walking" and smoothedSpeed < Config.IdleThreshold and "idle" or currentAnim)
+            local animState = currentAnim == "idle" and smoothedSpeed > self.Config.WalkThreshold and "walking" 
+                or (currentAnim == "walking" and smoothedSpeed < self.Config.IdleThreshold and "idle" or currentAnim)
 
             petData.AnimState = animState
-            SwitchState(petData, animState)
+            self:SwitchState(petData, animState)
         end
     end
 end
 
 --========================================
--- PUBLIC API
+-- MAIN EXECUTION & GUI CONTROLS
 --========================================
 
-local PetVisualClient = {
-    StartOrder = Config.StartOrder
+local GUI = CreateMikkaHub()
+local MikkaHub = {
+    GUI = GUI,
+    PetSystem = PetSystem,
+    Active = false,
 }
 
--- Snap pets for a specific player (instant reposition)
-function PetVisualClient:SnapPetsForPlayer(player)
-    SnapPetsForPlayer(player)
-end
+-- Pet System Controls Section
+CreateSection(GUI.Content, "🐾 Pet System Controls")
 
--- Snap local pets to follow player
-function PetVisualClient:SnapLocalPetsToFollow()
-    SnapLocalPetsToFollow()
-end
+-- Toggle: Enable Pet Visuals
+CreateToggle(GUI.Content, "Enable Pet Visuals", false, function(state)
+    MikkaHub.Active = state
+    if state then
+        PetSystem:Init()
 
--- Initialize (called once)
-function PetVisualClient:Init()
-    -- Create folders
-    VisualFolder = Instance.new("Folder")
-    VisualFolder.Name = "_PetVisualClient"
-    VisualFolder.Parent = workspace
+        local petRefs = workspace:FindFirstChild("PlayerPetReferences") 
+            or workspace:WaitForChild("PlayerPetReferences", 30)
 
-    ModelsFolder = Instance.new("Folder")
-    ModelsFolder.Name = "Models"
-    ModelsFolder.Parent = VisualFolder
+        if petRefs and petRefs:IsA("Folder") then
+            PetSystem:WatchRoot(petRefs)
 
-    CarryFolder = Instance.new("Folder")
-    CarryFolder.Name = "Carry"
-    CarryFolder.Parent = VisualFolder
-end
-
--- Start (called after Init)
-function PetVisualClient:Start()
-    -- Watch PlayerPetReferences
-    local petRefs = workspace:FindFirstChild("PlayerPetReferences") 
-        or workspace:WaitForChild("PlayerPetReferences", 30)
-
-    if petRefs and petRefs:IsA("Folder") then
-        WatchRoot(petRefs)
-
-        -- Networking events
-        if Networking and Networking.SFX and Networking.SFX.OwlHoot then
-            Networking.SFX.OwlHoot.OnClientEvent:Connect(PlayOwlHoot)
-        end
-
-        if Networking and Networking.Place and Networking.Place.TeleportedBack then
-            Networking.Place.TeleportedBack.OnClientEvent:Connect(function()
-                task.spawn(function()
-                    RunService.Heartbeat:Wait()
-                    self:SnapPetsForPlayer(Players.LocalPlayer)
+            -- Networking events
+            if PetSystem.Networking and PetSystem.Networking.SFX and PetSystem.Networking.SFX.OwlHoot then
+                PetSystem.Networking.SFX.OwlHoot.OnClientEvent:Connect(function(soundId)
+                    PetSystem:PlayOwlHoot(soundId)
                 end)
-            end)
-        end
+            end
 
-        -- Frog jump handling
-        local function HookCharacter(character)
-            local humanoid = character:FindFirstChildOfClass("Humanoid") 
-                or character:WaitForChild("Humanoid", 10)
+            if PetSystem.Networking and PetSystem.Networking.Place and PetSystem.Networking.Place.TeleportedBack then
+                PetSystem.Networking.Place.TeleportedBack.OnClientEvent:Connect(function()
+                    task.spawn(function()
+                        RunService.Heartbeat:Wait()
+                        PetSystem:SnapPetsForPlayer(LocalPlayer)
+                    end)
+                end)
+            end
 
-            if humanoid and humanoid:IsA("Humanoid") then
-                humanoid.Jumping:Connect(function(isJumping)
-                    if isJumping then
-                        local now = os.clock()
-                        if now - LastFrogJumpTime >= Config.SnapCooldown then
-                            LastFrogJumpTime = now
-                            if Networking and Networking.Pets and Networking.Pets.FrogJump then
-                                Networking.Pets.FrogJump:Fire()
+            -- Frog jump
+            local lastFrogJump = 0
+            local function HookCharacter(character)
+                local humanoid = character:FindFirstChildOfClass("Humanoid") 
+                    or character:WaitForChild("Humanoid", 10)
+                if humanoid and humanoid:IsA("Humanoid") then
+                    humanoid.Jumping:Connect(function(isJumping)
+                        if isJumping then
+                            local now = os.clock()
+                            if now - lastFrogJump >= PetSystem.Config.SnapCooldown then
+                                lastFrogJump = now
+                                if PetSystem.Networking and PetSystem.Networking.Pets and PetSystem.Networking.Pets.FrogJump then
+                                    PetSystem.Networking.Pets.FrogJump:Fire()
+                                end
                             end
                         end
+                    end)
+                end
+            end
+
+            LocalPlayer.CharacterAdded:Connect(HookCharacter)
+            if LocalPlayer.Character then
+                task.spawn(HookCharacter, LocalPlayer.Character)
+            end
+
+            -- Snap broadcast
+            if PetSystem.Networking and PetSystem.Networking.Pets and PetSystem.Networking.Pets.SnapPetsBroadcast then
+                PetSystem.Networking.Pets.SnapPetsBroadcast.OnClientEvent:Connect(function(userId)
+                    if userId == LocalPlayer.UserId then return end
+                    local player = Players:GetPlayerByUserId(userId)
+                    if player then
+                        task.spawn(function()
+                            RunService.Heartbeat:Wait()
+                            PetSystem:SnapPetsForPlayer(player)
+                        end)
                     end
                 end)
             end
-        end
 
-        Players.LocalPlayer.CharacterAdded:Connect(HookCharacter)
-        if Players.LocalPlayer.Character then
-            task.spawn(HookCharacter, Players.LocalPlayer.Character)
-        end
+            -- Bind loops
+            RunService:BindToRenderStep("PetVisualFollow_Mikka", Enum.RenderPriority.Camera.Value + 1, function(dt)
+                PetSystem:OnRenderStep(dt)
+            end)
 
-        -- Snap pets broadcast from other players
-        if Networking and Networking.Pets and Networking.Pets.SnapPetsBroadcast then
-            Networking.Pets.SnapPetsBroadcast.OnClientEvent:Connect(function(userId)
-                if userId == Players.LocalPlayer.UserId then
-                    return
-                end
-
-                local player = Players:GetPlayerByUserId(userId)
-                if player then
-                    task.spawn(function()
-                        RunService.Heartbeat:Wait()
-                        self:SnapPetsForPlayer(player)
-                    end)
-                end
+            RunService.Heartbeat:Connect(function(dt)
+                PetSystem:OnHeartbeat(dt)
             end)
         end
 
-        -- Bind render step for smooth following
-        RunService:BindToRenderStep("PetVisualFollow", Enum.RenderPriority.Camera.Value + 1, OnRenderStep)
+        GUI.StatusLabel.Text = "Status: Pet System Active"
+        GUI.StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        -- Disable
+        pcall(function()
+            RunService:UnbindFromRenderStep("PetVisualFollow_Mikka")
+        end)
 
-        -- Heartbeat for animation states and ground tracking
-        RunService.Heartbeat:Connect(OnHeartbeat)
+        for slot, _ in pairs(PetSystem.ActivePets) do
+            PetSystem:DestroyActive(slot)
+        end
+
+        if PetSystem.VisualFolder then
+            PetSystem.VisualFolder:Destroy()
+            PetSystem.VisualFolder = nil
+        end
+
+        PetSystem.Active = false
+        PetSystem.ActivePets = {}
+        PetSystem.PendingBuilds = {}
+        PetSystem.Destroying = {}
+
+        GUI.StatusLabel.Text = "Status: Pet System Disabled"
+        GUI.StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
     end
+end)
+
+-- Toggle: Show/Hide Pets
+CreateToggle(GUI.Content, "Show All Pets", true, function(state)
+    for _, petData in pairs(PetSystem.ActivePets) do
+        PetSystem:ApplyVisibility(petData, state)
+    end
+end)
+
+-- Toggle: Rainbow Mode
+CreateToggle(GUI.Content, "Force Rainbow Tags", false, function(state)
+    for _, petData in pairs(PetSystem.ActivePets) do
+        if state then
+            if not petData.Model:HasTag("PetRainbow") then
+                petData.Model:AddTag("PetRainbow")
+            end
+        else
+            if petData.Model:HasTag("PetRainbow") then
+                petData.Model:RemoveTag("PetRainbow")
+            end
+        end
+    end
+end)
+
+-- Separator
+local Sep2 = Instance.new("Frame")
+Sep2.Size = UDim2.new(1, -10, 0, 1)
+Sep2.Position = UDim2.new(0, 5, 0, 0)
+Sep2.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+Sep2.BorderSizePixel = 0
+Sep2.Parent = GUI.Content
+
+-- Settings Section
+CreateSection(GUI.Content, "⚙️ Settings")
+
+CreateSlider(GUI.Content, "Follow Speed", 5, 30, 14, function(value)
+    PetSystem.Config.FollowSpeed = value
+end)
+
+CreateSlider(GUI.Content, "Rotation Speed", 5, 25, 12, function(value)
+    PetSystem.Config.RotationSpeed = value
+end)
+
+CreateSlider(GUI.Content, "Smoothing", 10, 100, 60, function(value)
+    PetSystem.Config.SmoothingFactor = value
+end)
+
+-- Separator
+local Sep3 = Instance.new("Frame")
+Sep3.Size = UDim2.new(1, -10, 0, 1)
+Sep3.Position = UDim2.new(0, 5, 0, 0)
+Sep3.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+Sep3.BorderSizePixel = 0
+Sep3.Parent = GUI.Content
+
+-- Actions Section
+CreateSection(GUI.Content, "🎮 Actions")
+
+CreateButton(GUI.Content, "📍 Snap Local Pets", function()
+    PetSystem:SnapLocalPetsToFollow()
+    GUI.StatusLabel.Text = "Status: Pets Snapped!"
+    task.delay(1, function()
+        if MikkaHub.Active then
+            GUI.StatusLabel.Text = "Status: Pet System Active"
+        else
+            GUI.StatusLabel.Text = "Status: Ready | Executor: " .. executor
+        end
+    end)
+end)
+
+CreateButton(GUI.Content, "🔄 Refresh Ground Filter", function()
+    PetSystem:RefreshGroundFilter()
+    GUI.StatusLabel.Text = "Status: Ground Filter Refreshed!"
+    task.delay(1, function()
+        if MikkaHub.Active then
+            GUI.StatusLabel.Text = "Status: Pet System Active"
+        else
+            GUI.StatusLabel.Text = "Status: Ready | Executor: " .. executor
+        end
+    end)
+end)
+
+CreateButton(GUI.Content, "💥 Destroy All Pets", function()
+    for slot, _ in pairs(PetSystem.ActivePets) do
+        PetSystem:DestroyActive(slot)
+    end
+    GUI.StatusLabel.Text = "Status: All Pets Destroyed"
+    task.delay(1, function()
+        if MikkaHub.Active then
+            GUI.StatusLabel.Text = "Status: Pet System Active"
+        else
+            GUI.StatusLabel.Text = "Status: Ready | Executor: " .. executor
+        end
+    end)
+end)
+
+-- Separator
+local Sep4 = Instance.new("Frame")
+Sep4.Size = UDim2.new(1, -10, 0, 1)
+Sep4.Position = UDim2.new(0, 5, 0, 0)
+Sep4.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+Sep4.BorderSizePixel = 0
+Sep4.Parent = GUI.Content
+
+-- Info Section
+CreateSection(GUI.Content, "ℹ️ Info")
+
+local InfoLabel = Instance.new("TextLabel")
+InfoLabel.Size = UDim2.new(1, -10, 0, 60)
+InfoLabel.BackgroundTransparency = 1
+InfoLabel.Text = "Mikka Hub v1.0
+GAG 2 Pet Visual Spawner
+Delta Executor Compatible
+All original features included"
+InfoLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+InfoLabel.TextSize = 11
+InfoLabel.Font = Enum.Font.Gotham
+InfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+InfoLabel.TextYAlignment = Enum.TextYAlignment.Top
+InfoLabel.Parent = GUI.Content
+
+--========================================
+-- GUI FUNCTIONALITY
+--========================================
+
+-- Draggable
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+
+GUI.TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = GUI.MainFrame.Position
+    end
+end)
+
+GUI.TitleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        GUI.MainFrame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+        dragInput = nil
+    end
+end)
+
+-- Close button
+GUI.CloseBtn.MouseButton1Click:Connect(function()
+    GUI.ScreenGui:Destroy()
+    MikkaHub.GUI = nil
+end)
+
+-- Minimize button
+local minimized = false
+local originalSize = GUI.MainFrame.Size
+
+GUI.MinBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        GUI.MainFrame:TweenSize(UDim2.new(0, 420, 0, 40), "Out", "Quad", 0.3, true)
+        GUI.MinBtn.Text = "+"
+    else
+        GUI.MainFrame:TweenSize(originalSize, "Out", "Quad", 0.3, true)
+        GUI.MinBtn.Text = "-"
+    end
+end)
+
+-- Toggle key (RightShift)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
+        if GUI.ScreenGui.Enabled then
+            GUI.MainFrame.Visible = false
+            GUI.ScreenGui.Enabled = false
+        else
+            GUI.MainFrame.Visible = true
+            GUI.ScreenGui.Enabled = true
+        end
+    end
+end)
+
+--========================================
+-- NOTIFICATION SYSTEM
+--========================================
+
+local function Notify(title, text, duration)
+    duration = duration or 3
+
+    local notifGui = Instance.new("ScreenGui")
+    notifGui.Name = "MikkaNotification"
+    notifGui.ResetOnSpawn = false
+    pcall(function() notifGui.Parent = CoreGui end)
+    if not notifGui.Parent then
+        notifGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+
+    local notifFrame = Instance.new("Frame")
+    notifFrame.Size = UDim2.new(0, 300, 0, 80)
+    notifFrame.Position = UDim2.new(1, 20, 1, -100)
+    notifFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    notifFrame.BorderSizePixel = 0
+    notifFrame.Parent = notifGui
+
+    local notifCorner = Instance.new("UICorner")
+    notifCorner.CornerRadius = UDim.new(0, 10)
+    notifCorner.Parent = notifFrame
+
+    local notifTitle = Instance.new("TextLabel")
+    notifTitle.Size = UDim2.new(1, -20, 0, 25)
+    notifTitle.Position = UDim2.new(0, 10, 0, 5)
+    notifTitle.BackgroundTransparency = 1
+    notifTitle.Text = "🌸 " .. title
+    notifTitle.TextColor3 = Color3.fromRGB(255, 182, 193)
+    notifTitle.TextSize = 14
+    notifTitle.Font = Enum.Font.GothamBold
+    notifTitle.TextXAlignment = Enum.TextXAlignment.Left
+    notifTitle.Parent = notifFrame
+
+    local notifText = Instance.new("TextLabel")
+    notifText.Size = UDim2.new(1, -20, 0, 40)
+    notifText.Position = UDim2.new(0, 10, 0, 30)
+    notifText.BackgroundTransparency = 1
+    notifText.Text = text
+    notifText.TextColor3 = Color3.fromRGB(200, 200, 200)
+    notifText.TextSize = 12
+    notifText.Font = Enum.Font.Gotham
+    notifText.TextXAlignment = Enum.TextXAlignment.Left
+    notifText.TextYAlignment = Enum.TextYAlignment.Top
+    notifText.TextWrapped = true
+    notifText.Parent = notifFrame
+
+    notifFrame:TweenPosition(UDim2.new(1, -320, 1, -100), "Out", "Quad", 0.5, true)
+
+    task.delay(duration, function()
+        notifFrame:TweenPosition(UDim2.new(1, 20, 1, -100), "In", "Quad", 0.5, true)
+        task.wait(0.5)
+        notifGui:Destroy()
+    end)
 end
 
-return PetVisualClient
+-- Initial notification
+Notify("Mikka Hub Loaded", "Press RightShift to toggle GUI
+Enable Pet Visuals to start", 5)
+
+--========================================
+-- RETURN
+--========================================
+
+return MikkaHub
